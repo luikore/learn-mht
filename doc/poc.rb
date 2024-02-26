@@ -49,144 +49,90 @@ SIGNER_PUBLIC_KEY = Secp256k1::Util.bin_to_hex(KEY_PAIR.public_key.compressed)
 def make_new_leaf(event)
   event_size = Event.where(signer: event.signer).size
   if event_size == 1
-    MerkleTreeLeaf.create! data: event.data,
-                           hashed_data: event.hashed_data,
-                           signed_hashed_data: event.signed_hashed_data,
-                           signer: event.signer,
-                           timestamp: event.timestamp
+    MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
+                           session: event.session,
+                           event: event
   elsif event_size == 1
     left_leaf =
       begin
         previous_event = Event.where(signer: SIGNER_PUBLIC_KEY).order(timestamp: :desc).offset(1).first
-        MerkleTreeLeaf.find_by!(hashed_data: previous_event.hashed_data).root
+        MerkleTreeLeaf.find_by!(calculated_hash: previous_event.hashed_data).root
       end
 
-    right_leaf = MerkleTreeLeaf.create! data: event.data,
-                                        hashed_data: event.hashed_data,
-                                        signed_hashed_data: event.signed_hashed_data,
-                                        signer: event.signer,
-                                        timestamp: event.timestamp
+    right_leaf = MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
+                                        session: event.session,
+                                        event: event
 
-    data = left_leaf.hashed_data + event.hashed_data
-    hashed_data = digest("\x01" + data)
-    signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-    timestamp = event.timestamp
-    root_leaf = MerkleTreeLeaf.create! data: data,
-                                       hashed_data: hashed_data,
-                                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                                       signer: event.signer,
-                                       timestamp: timestamp
-    root_leaf.children << left_leaf
-    root_leaf.children << right_leaf
+    calculated_hash = digest("\x01" + left_leaf.calculated_hash + event.hashed_data)
+    root_leaf = MerkleTreeLeaf.create! calculated_hash: calculated_hash,
+                                       session: event.session,
+                                       event: event
+
+    root_leaf.append_child(left_leaf)
+    root_leaf.append_child(right_leaf)
   elsif event_size.odd?
     left_leaf =
       begin
         previous_event = Event.where(signer: SIGNER_PUBLIC_KEY).order(timestamp: :desc).offset(1).first
-        MerkleTreeLeaf.find_by!(hashed_data: previous_event.hashed_data).root
+        MerkleTreeLeaf.find_by!(calculated_hash: previous_event.hashed_data).root
       end
 
-    right_leaf = MerkleTreeLeaf.create! data: event.data,
-                                        hashed_data: event.hashed_data,
-                                        signed_hashed_data: event.signed_hashed_data,
-                                        signer: event.signer,
-                                        timestamp: event.timestamp
+    right_leaf = MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
+                                        session: event.session,
+                                        event: event
 
     left_leaf_children = left_leaf.children
     left_leaf_left_child = left_leaf_children.first
     left_leaf_right_child = left_leaf_children.last
     if left_leaf_left_child.descendants.size == left_leaf_right_child.descendants.size
-      data = left_leaf.hashed_data + event.hashed_data
-      hashed_data = digest("\x01" + data)
-      signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-      timestamp = event.timestamp
-      root_leaf = MerkleTreeLeaf.create! data: data,
-                                         hashed_data: hashed_data,
-                                         signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                                         signer: event.signer,
-                                         timestamp: timestamp
-      root_leaf.children << left_leaf
-      root_leaf.children << right_leaf
+      calculated_hash = digest("\x01" + left_leaf.calculated_hash + event.hashed_data)
+      root_leaf = MerkleTreeLeaf.create! calculated_hash: calculated_hash,
+                                         session: event.session,
+                                         event: event
+
+      root_leaf.append_child(left_leaf)
+      root_leaf.append_child(right_leaf)
     else
       # If depth not the same, the right child must be the thinner one
 
-      data = left_leaf_right_child.hashed_data + right_leaf.hashed_data
-      hashed_data = digest("\x01" + data)
-      signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-      timestamp = right_leaf.timestamp
+      calculated_hash = digest("\x01" + left_leaf_right_child.calculated_hash + right_leaf.calculated_hash)
+      new_left_leaf_right_child = MerkleTreeLeaf.create! parent: left_leaf,
+                                                         calculated_hash: calculated_hash,
+                                                         session: event.session
 
-      new_left_leaf_right_child = MerkleTreeLeaf.create! data: data,
-                                                         hashed_data: hashed_data,
-                                                         signed_hashed_data: signed_hashed_data,
-                                                         signer: event.signer,
-                                                         timestamp: timestamp,
-                                                         parent: left_leaf
+      new_left_leaf_right_child.append_child(left_leaf_right_child)
+      new_left_leaf_right_child.append_child(right_leaf)
 
-      left_leaf_right_child.update! parent: new_left_leaf_right_child
-      new_left_leaf_right_child.children << right_leaf
-
-      data = left_leaf_left_child.hashed_data + new_left_leaf_right_child.hashed_data
-      hashed_data = digest("\x01" + data)
-      signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-      timestamp = event.timestamp
-
-      left_leaf.update! data: data,
-                        hashed_data: hashed_data,
-                        signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                        timestamp: timestamp
+      calculated_hash = digest("\x01" + left_leaf_left_child.calculated_hash + new_left_leaf_right_child.calculated_hash)
+      left_leaf.update! calculated_hash: calculated_hash
     end
   else # size is even
     origin_right_leaf =
       begin
         previous_event = Event.where(signer: SIGNER_PUBLIC_KEY).order(timestamp: :desc).offset(1).first
-        MerkleTreeLeaf.find_by!(hashed_data: previous_event.hashed_data)
+        MerkleTreeLeaf.find_by!(calculated_hash: previous_event.hashed_data)
       end
 
-    left_leaf = MerkleTreeLeaf.create! data: origin_right_leaf.data,
-                                       hashed_data: origin_right_leaf.hashed_data,
-                                       signed_hashed_data: origin_right_leaf.signed_hashed_data,
-                                       signer: origin_right_leaf.signer,
-                                       timestamp: origin_right_leaf.timestamp
-    right_leaf = MerkleTreeLeaf.create! data: event.data,
-                                        hashed_data: event.hashed_data,
-                                        signed_hashed_data: event.signed_hashed_data,
-                                        signer: event.signer,
-                                        timestamp: event.timestamp
-    origin_right_leaf.children << left_leaf
-    origin_right_leaf.children << right_leaf
+    left_leaf = MerkleTreeLeaf.create! calculated_hash: origin_right_leaf.calculated_hash,
+                                       session: origin_right_leaf.session
+    right_leaf = MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
+                                        session: event.session,
+                                        event: event
+    origin_right_leaf.append_child(left_leaf)
+    origin_right_leaf.append_child(right_leaf)
 
-    data = origin_right_leaf.hashed_data + event.hashed_data
-    hashed_data = digest("\x01" + data)
-    signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-    timestamp = event.timestamp
-
-    origin_right_leaf.update! data: data,
-                              hashed_data: hashed_data,
-                              signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                              timestamp: timestamp
+    calculated_hash = digest("\x01" + origin_right_leaf.calculated_hash + event.hashed_data)
+    origin_right_leaf.update! calculated_hash: calculated_hash
 
     root_leaf = origin_right_leaf.parent
     if root_leaf
-      data = root_leaf.children.map(&:hashed_data).join
-      hashed_data = digest("\x01" + data)
-      signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-      timestamp = event.timestamp
-
-      root_leaf.update! data: data,
-                        hashed_data: hashed_data,
-                        signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                        timestamp: timestamp
+      calculated_hash = root_leaf.children.map(&:calculated_hash).join
+      root_leaf.update! calculated_hash: calculated_hash
 
       root_leaf = root_leaf.parent
       if root_leaf
-        data = root_leaf.children.map(&:hashed_data).join
-        hashed_data = digest("\x01" + data)
-        signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-        timestamp = event.timestamp
-
-        root_leaf.update! data: data,
-                          hashed_data: hashed_data,
-                          signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                          timestamp: timestamp
+        calculated_hash = root_leaf.children.map(&:calculated_hash).join
+        root_leaf.update! calculated_hash: calculated_hash
       end
     end
   end
@@ -197,10 +143,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758135
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -209,10 +156,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758136
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -221,10 +169,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758137
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -233,10 +182,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758138
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -245,10 +195,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758139
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -257,10 +208,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758140
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -269,10 +221,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758141
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -281,10 +234,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758142
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -293,10 +247,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758143
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -305,10 +260,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758144
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 
@@ -317,10 +273,11 @@ hashed_data = digest("\0" + data)
 signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
 timestamp = 1708758145
 
-event = Event.create! data: data,
+event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                      session: "TEST",
+                      data: data,
                       hashed_data: hashed_data,
                       signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                      signer: SIGNER_PUBLIC_KEY,
                       timestamp: timestamp
 make_new_leaf(event)
 

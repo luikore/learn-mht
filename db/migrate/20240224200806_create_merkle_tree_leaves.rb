@@ -5,11 +5,11 @@ class CreateMerkleTreeLeaves < ActiveRecord::Migration[7.2]
     create_table :merkle_tree_leaves do |t|
       t.integer :parent_id
 
-      t.string :signer, null: false
-      t.integer :timestamp, null: false
-      t.string :data
-      t.string :hashed_data, null: false
-      t.string :signed_hashed_data, null: false
+      t.string :calculated_hash, null: false
+      t.integer :sort_order, null: false, default: 0
+
+      t.string :session, null: false
+      t.references :event
     end
   end
 end
