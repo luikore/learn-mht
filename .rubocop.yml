@@ -1,0 +1,25 @@
+inherit_gem: { rubocop-rails-omakase: rubocop.yml }
+
+# Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
+Layout/SpaceInsideArrayLiteralBrackets:
+  Enabled: true
+  EnforcedStyle: no_space
+
+# Checks for a newline after the final magic comment
+Layout/EmptyLineAfterMagicComment:
+  Enabled: true
+
+# Looks for trailing blank lines and a final newline in the source code
+Layout/TrailingEmptyLines:
+  Enabled: true
+  EnforcedStyle: final_newline
+
+# Looks for trailing whitespace in the source code
+Layout/TrailingWhitespace:
+  Enabled: true
+  AllowInHeredoc: false
+
+# Always add the frozen string literal magic comment to the top of files
+Style/FrozenStringLiteralComment:
+  Enabled: true
+  EnforcedStyle: always
