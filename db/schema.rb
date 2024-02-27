@@ -35,8 +35,8 @@ ActiveRecord::Schema[7.2].define(version: 2024_02_25_090852) do
   create_table "merkle_tree_leaves", force: :cascade do |t|
     t.integer "parent_id"
     t.string "calculated_hash", null: false
-    t.integer "sort_order", default: 0, null: false
     t.string "session", null: false
+    t.integer "timestamp", null: false
     t.bigint "event_id"
     t.index ["event_id"], name: "index_merkle_tree_leaves_on_event_id"
   end

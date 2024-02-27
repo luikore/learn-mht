@@ -31,6 +31,7 @@ def make_new_leaf(event)
   if event_size == 1
     MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
                            session: event.session,
+                           timestamp: event.timestamp,
                            event: event
 
     return
@@ -43,15 +44,17 @@ def make_new_leaf(event)
 
     right_leaf = MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
                                         session: event.session,
+                                        timestamp: event.timestamp,
                                         event: event
 
     calculated_hash = digest("\x01" + left_leaf.calculated_hash + event.hashed_data)
     root_leaf = MerkleTreeLeaf.create! calculated_hash: calculated_hash,
                                        session: event.session,
+                                       timestamp: event.timestamp,
                                        event: event
 
-    root_leaf.append_child(left_leaf)
-    root_leaf.append_child(right_leaf)
+    root_leaf.add_child(left_leaf)
+    root_leaf.add_child(right_leaf)
 
     return
   elsif event_size.odd?
@@ -63,6 +66,7 @@ def make_new_leaf(event)
 
     right_leaf = MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
                                         session: event.session,
+                                        timestamp: event.timestamp,
                                         event: event
 
     parent_leaf = left_leaf.root
@@ -72,15 +76,28 @@ def make_new_leaf(event)
       parent_leaf_right_child = parent_leaf_children.last
 
       if parent_leaf_left_child.descendants.size == parent_leaf_right_child.descendants.size
-        calculated_hash = digest("\x01" + parent_leaf.calculated_hash + event.hashed_data)
-        new_parent_leaf = MerkleTreeLeaf.create! calculated_hash: calculated_hash,
-                                                 session: parent_leaf.session
+        parent_leaf_parent = parent_leaf.parent
+        calculated_hash = digest("\x01" + parent_leaf.calculated_hash + right_leaf.calculated_hash)
+        new_parent_leaf = MerkleTreeLeaf.create! parent: parent_leaf_parent,
+                                                 calculated_hash: calculated_hash,
+                                                 session: parent_leaf.session,
+                                                 timestamp: parent_leaf.timestamp
 
-        if parent_leaf.parent
-          parent_leaf.parent.append_child(new_parent_leaf)
-        end
-        parent_leaf.update! parent: new_parent_leaf
-        new_parent_leaf.append_child(right_leaf)
+        # if parent_leaf_parent
+        #   l = parent_leaf_parent.children.first
+        #   r = parent_leaf_parent.children.last
+        #   puts "#{parent_leaf.parent.calculated_hash}: #{l.calculated_hash}(#{l.timestamp}) - #{r.calculated_hash}(#{r.timestamp})"
+        # end
+
+        new_parent_leaf.add_child(parent_leaf)
+        new_parent_leaf.add_child(right_leaf)
+
+        # puts "#{new_parent_leaf.calculated_hash}: #{parent_leaf.calculated_hash} - #{right_leaf.calculated_hash}"
+        # if new_parent_leaf.parent
+        #   l = new_parent_leaf.parent.children.first
+        #   r = new_parent_leaf.parent.children.last
+        #   puts "#{new_parent_leaf.parent.calculated_hash}: #{l.calculated_hash}(#{l.timestamp}) - #{r.calculated_hash}(#{r.timestamp})"
+        # end
 
         root_leaf = new_parent_leaf.parent
         break
@@ -96,40 +113,71 @@ def make_new_leaf(event)
       end
 
     left_leaf = MerkleTreeLeaf.create! calculated_hash: origin_right_leaf.calculated_hash,
-                                       session: origin_right_leaf.session
+                                       session: origin_right_leaf.session,
+                                       timestamp: origin_right_leaf.timestamp
     right_leaf = MerkleTreeLeaf.create! calculated_hash: event.hashed_data,
                                         session: event.session,
+                                        timestamp: event.timestamp,
                                         event: event
-    origin_right_leaf.append_child(left_leaf)
-    origin_right_leaf.append_child(right_leaf)
+    origin_right_leaf.add_child(left_leaf)
+    origin_right_leaf.add_child(right_leaf)
 
-    calculated_hash = digest("\x01" + origin_right_leaf.calculated_hash + event.hashed_data)
-    origin_right_leaf.update! calculated_hash: calculated_hash
+    calculated_hash = digest("\x01" + left_leaf.calculated_hash + right_leaf.calculated_hash)
+    origin_right_leaf.update! calculated_hash: calculated_hash,
+                              timestamp: right_leaf.timestamp
+
+    # puts "#{origin_right_leaf.calculated_hash}: #{left_leaf.calculated_hash} - #{right_leaf.calculated_hash}"
 
     root_leaf = origin_right_leaf.parent
   end
 
   while root_leaf do
+    # l = root_leaf.children.first
+    # r = root_leaf.children.last
+    # puts "#{l.calculated_hash} : #{r.calculated_hash}"
+
     calculated_hash = root_leaf.children.map(&:calculated_hash).join
-    root_leaf.update! calculated_hash: calculated_hash
+    root_leaf.update! calculated_hash: calculated_hash,
+                      timestamp: root_leaf.children.map(&:timestamp).max
 
     root_leaf = root_leaf.parent
   end
 end
 
-("A".."Z").each_with_index do |data, i|
+("A".."Z").to_a.map(&:to_s).each_with_index do |data, i|
   hashed_data = digest("\0" + data)
   signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
   timestamp = 1708758140 + i
 
   event = Event.create! signer: SIGNER_PUBLIC_KEY,
-                        session: "TEST",
+                        session: "CHAR",
                         data: data,
                         hashed_data: hashed_data,
                         signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
                         timestamp: timestamp
   make_new_leaf(event)
 end
+root = MerkleTreeLeaf.where(session: "CHAR").first.root
+puts root.calculated_hash
+puts root.to_dot_digraph
+puts ""
 
-puts MerkleTreeLeaf.last.root.to_dot_digraph
+(1..100).to_a.map(&:to_s).each_with_index do |data, i|
+  hashed_data = digest("\0" + data)
+  signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
+  timestamp = 1708758140 + i
+
+  event = Event.create! signer: SIGNER_PUBLIC_KEY,
+                        session: "NUMBER",
+                        data: data,
+                        hashed_data: hashed_data,
+                        signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
+                        timestamp: timestamp
+  make_new_leaf(event)
+end
+root = MerkleTreeLeaf.where(session: "NUMBER").first.root
+puts root.calculated_hash
+puts root.to_dot_digraph
+puts ""
+
 # binding.irb
