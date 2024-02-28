@@ -1,24 +1,43 @@
 # README
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+## Requirements
 
-Things you may want to cover:
+- Ruby 3.3.0
+- PostgreSQL
 
-* Ruby version
+## Prepare
 
-* System dependencies
+```
+bundle
+cp config/database.yml.sample config/database.yml
+cp config/cable.yml.sample config/cable.yml
+EDITOR=cat bin/rails credentials:edit
+rails db:create
+```
 
-* Configuration
+## Run
 
-* Database creation
+```
+rails db:reset && ./doc/poc.rb
+```
 
-* Database initialization
+Result is GraphViz dot
 
-* How to run the test suite
+Put it to <https://dreampuf.github.io/GraphvizOnline/> to visualize
 
-* Services (job queues, cache servers, search engines, etc.)
+## Showcase
 
-* Deployment instructions
+- [db/migrate](db/migrate)
+- [doc/poc.rb](doc/poc.rb)
 
-* ...
+## References
+
+- https://blog.ethereum.org/2015/11/15/merkling-in-ethereum
+- https://transparency.dev/verifiable-data-structures/
+- https://transparency.dev/how-to-design-a-verifiable-system/
+- https://datatracker.ietf.org/doc/html/rfc9162#name-merkle-trees
+- https://aly.arriqaaq.com/merkle-tree-and-verifiable-data-structures/
+- https://github.com/mpalmer/merkle-hash-tree
+- https://www.derpturkey.com/merkle-tree-construction-and-proof-of-inclusion/
+- https://github.com/OpenZeppelin/merkle-tree
+- https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/MerkleProof.sol
