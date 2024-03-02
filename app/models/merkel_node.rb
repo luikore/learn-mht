@@ -12,6 +12,10 @@ class MerkelNode < ApplicationRecord
     timestamp = event.timestamp
     session = event.session
 
+    # 创建叶子 (创建顺序从低到高)
+    create!(event: event, session: session, begin_ts: timestamp, end_ts: timestamp,
+      level: 0, full: true, calculated_hash: event.hashed_data)
+
     max_timestamp, = where("session = ? and end_ts < ?", session, timestamp).order(end_ts: :desc).limit(1).pluck :end_ts
 
     if max_timestamp
@@ -20,7 +24,7 @@ class MerkelNode < ApplicationRecord
 
       # 进位: 低层有多少 full 就创建多少个同层的新节点，直到将一个中层节点变成 full
       low_level = true
-      frontier.each do |node|
+      frontier.map! do |node|
         if low_level
           if node.full
             node = create!(session: session, begin_ts: timestamp, end_ts: timestamp, level: node.level, full: false)
@@ -36,6 +40,7 @@ class MerkelNode < ApplicationRecord
           node.end_ts = timestamp
           node.save!
         end
+        node
       end
 
       # frontier 各层全满，增加树高
@@ -46,10 +51,6 @@ class MerkelNode < ApplicationRecord
         create!(session: session, begin_ts: min_timestamp, end_ts: timestamp, level: largest_level + 1, full: true)
       end
     end
-
-    # 创建叶子
-    create!(event: event, session: session, begin_ts: timestamp, end_ts: timestamp,
-      level: 0, full: true, calculated_hash: event.hashed_data)
   end
 
   def self.root(session)
