@@ -24,7 +24,7 @@ ActiveRecord::Schema[7.2].define(version: 2024_02_28_151229) do
     t.index ["signer", "session"], name: "index_events_on_signer_and_session"
   end
 
-  create_table "merkel_nodes", force: :cascade do |t|
+  create_table "merkle_nodes", force: :cascade do |t|
     t.string "session", null: false
     t.bigint "event_id"
     t.string "calculated_hash"
@@ -34,23 +34,6 @@ ActiveRecord::Schema[7.2].define(version: 2024_02_28_151229) do
     t.integer "level", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["event_id"], name: "index_merkel_nodes_on_event_id"
-  end
-
-  create_table "merkle_tree_leaf_hierarchies", id: false, force: :cascade do |t|
-    t.integer "ancestor_id", null: false
-    t.integer "descendant_id", null: false
-    t.integer "generations", null: false
-    t.index ["ancestor_id", "descendant_id", "generations"], name: "merkle_tree_leaf_anc_desc_idx", unique: true
-    t.index ["descendant_id"], name: "merkle_tree_leaf_desc_idx"
-  end
-
-  create_table "merkle_tree_leaves", force: :cascade do |t|
-    t.integer "parent_id"
-    t.string "calculated_hash", null: false
-    t.string "session", null: false
-    t.integer "timestamp", null: false
-    t.bigint "event_id"
-    t.index ["event_id"], name: "index_merkle_tree_leaves_on_event_id"
+    t.index ["event_id"], name: "index_merkle_nodes_on_event_id"
   end
 end

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class MerkelNode < ApplicationRecord
+class MerkleNode < ApplicationRecord
   scope :of, ->(session) { where session: }
 
   belongs_to :event, optional: true
@@ -68,12 +68,12 @@ class MerkelNode < ApplicationRecord
 
   # 更新 parent 属性
   def load_parent!
-    self.parent = MerkelNode.where("session = ? and level = ? and (begin_ts = ? or end_ts = ?)", session, level + 1, begin_ts, end_ts).first
+    self.parent = MerkleNode.where("session = ? and level = ? and (begin_ts = ? or end_ts = ?)", session, level + 1, begin_ts, end_ts).first
   end
 
   # 更新 children 属性
   def load_children!
-    self.children = MerkelNode.where(
+    self.children = MerkleNode.where(
       "session = ? and level = ? and begin_ts >= ? and end_ts <= ?", session, level - 1, begin_ts, end_ts
     ).order(begin_ts: :asc).to_a
   end
@@ -93,7 +93,7 @@ class MerkelNode < ApplicationRecord
     if level == 0
       return []
     end
-    nodes = MerkelNode.where(
+    nodes = MerkleNode.where(
       "session = ? and begin_ts >= ? and end_ts <= ? and level < ?", session, begin_ts, end_ts, level
     ).order(
       level: :asc, begin_ts: :asc

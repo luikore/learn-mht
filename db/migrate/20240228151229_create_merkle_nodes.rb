@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-class CreateMerkelNodes < ActiveRecord::Migration[7.2]
+class CreateMerkleNodes < ActiveRecord::Migration[7.2]
   def change
     # 创建顺序：parent to children
-    create_table :merkel_nodes do |t|
+    create_table :merkle_nodes do |t|
       t.string :session, null: false # 一棵树的唯一标识
       t.references :event, null: true # 如果是叶子节点，那么将关联一个对应的 Event
       t.string :calculated_hash, null: true # 计算好的哈希, 可以延迟计算，避免相互依赖
@@ -26,19 +26,19 @@ class CreateMerkelNodes < ActiveRecord::Migration[7.2]
 # 索引，可能过度配置了
 =begin
 
-    add_index :merkel_nodes, :session
+    add_index :merkle_nodes, :session
 
     # 叶子节点的 timestamp 需要唯一递增
     # 所以每个节点的 (session, begin_ts, end_ts) 保持唯一
-    add_index :merkel_nodes, [:session, :begin_ts, :end_ts], unique: true
+    add_index :merkle_nodes, [:session, :begin_ts, :end_ts], unique: true
 
-    add_index :merkel_nodes, [:session, :end_ts]
+    add_index :merkle_nodes, [:session, :end_ts]
 
     # 直接父/子查询需要
-    add_index :merkel_nodes, [:session, :level]
+    add_index :merkle_nodes, [:session, :level]
 
     # 插入需要，用于查询未满节点
-    add_index :merkel_nodes, [:session, :full]
+    add_index :merkle_nodes, [:session, :full]
 
 =end
   end
