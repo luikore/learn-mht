@@ -97,16 +97,14 @@ class MerkelNode < ApplicationRecord
     ).order(
       level: :asc, begin_ts: :asc
     ).to_a
-    leafs, branches = nodes.partition { |n| n.level == 0 }
-    branches_by_begin_ts = branches.group_by &:begin_ts
-    branches_by_end_ts = branches.group_by &:end_ts
-    leafs.each do |leaf|
-      child = leaf
-      while child and child.level < level - 1
+    nodes_by_level = nodes.group_by(&:level).to_a.sort_by(&:first).map(&:last)
+    nodes_by_level.each_cons 2 do |leafs, branches|
+      branches_by_begin_ts = branches.group_by &:begin_ts
+      branches_by_end_ts = branches.group_by &:end_ts
+      leafs.each do |child|
         parent = branches_by_begin_ts[child.begin_ts]&.find { |n| n.level == child.level + 1 }
         parent ||= branches_by_end_ts[child.end_ts]&.find { |n| n.level == child.level + 1 }
         (parent.children ||= []) << child
-        child = parent
       end
     end
     self.children = nodes.select { |n| n.level == level - 1 }
