@@ -102,12 +102,12 @@ class MerkelNode < ApplicationRecord
       branches_by_begin_ts = branches.group_by &:begin_ts
       branches_by_end_ts = branches.group_by &:end_ts
       leafs.each do |child|
-        parent = branches_by_begin_ts[child.begin_ts]&.find { |n| n.level == child.level + 1 }
-        parent ||= branches_by_end_ts[child.end_ts]&.find { |n| n.level == child.level + 1 }
+        parent = branches_by_begin_ts[child.begin_ts]&.first
+        parent ||= branches_by_end_ts[child.end_ts]&.first
         (parent.children ||= []) << child
       end
     end
-    self.children = nodes.select { |n| n.level == level - 1 }
+    self.children = nodes_by_level.last
     nodes
   end
 
