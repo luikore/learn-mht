@@ -52,7 +52,7 @@ namespace :benchmark do
   task :clear_log do 
     puts "Clearing log"
     path = Rails.root.join('log', 'development.log')
-    `rm #{path}`
+    `echo "" > #{path}`
   end
 
   task :clear_data do 
@@ -62,7 +62,14 @@ namespace :benchmark do
   end
 
   task :get_insert_and_update_count_from_log do
-    # TODO
+    path = Rails.root.join('log', 'development.log')
+    log = File.read(path)
+    insert_count = log.scan(/INSERT /).count
+    update_count = log.scan(/UPDATE /).count
+    select_count = log.scan(/SELECT /).count
+    puts "Insert count: #{insert_count}"
+    puts "Update count: #{update_count}"
+    puts "Select count: #{select_count}"
   end
 
   desc 'Benchmark for creating events and merkle_nodes'
