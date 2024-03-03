@@ -29,6 +29,8 @@ benchmarks
 
 ```
 bundle exec rake benchmark:bm NUM=500
+# coalesced re-hashing
+bundle exec rake benchmark:bm NUM=500 COALESCE=1
 ```
 
 ## Showcase

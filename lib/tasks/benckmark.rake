@@ -11,11 +11,6 @@ def digest(m)
   IdentityDigest.digest(m)
 end
 
-def make_new_leaf(event)
-  lineage = MerkleNode.push_leaf!(event)
-  MerkleNode.untaint! event.session, IdentityDigest
-end
-
 SECP256K1 = Secp256k1::Context.create
 # Fixed seed for test
 KEY_PAIR = SECP256K1.key_pair_from_private_key(
@@ -27,6 +22,11 @@ if ENV['NUM']
   NUM = ENV['NUM'].to_i
 else
   NUM = 1000
+end
+if ENV['COALESCE']
+  COALESCE = (ENV['COALESCE'] == "1")
+else
+  COALESCE = false
 end
 
 def do_bm
@@ -42,8 +42,14 @@ def do_bm
                           signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
                           timestamp: timestamp
     Rails.logger.info "Created event #{data}"
-    make_new_leaf(event)
+    MerkleNode.push_leaf!(event)
+    if !COALESCE or (i + 1) % 50 == 0
+      MerkleNode.untaint! event.session, IdentityDigest
+    end
     Rails.logger.info "Created leaf #{data}"
+  end
+  if COALESCE
+    MerkleNode.untaint! "CHAR", IdentityDigest
   end
   root = MerkleNode.root("CHAR")
 end
@@ -53,6 +59,8 @@ namespace :benchmark do
     puts "Clearing log"
     path = Rails.root.join('log', 'development.log')
     `echo "" > #{path}`
+    path2 = Rails.root.join('log', 'development.log.0')
+    `echo "" > #{path2}`
   end
 
   task :clear_data do 
