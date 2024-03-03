@@ -23,35 +23,31 @@ if ENV['NUM']
 else
   NUM = 1000
 end
-if ENV['COALESCE']
-  COALESCE = (ENV['COALESCE'] == "1")
+if ENV['BATCH']
+  BATCH = ENV['BATCH'].to_i
 else
-  COALESCE = false
+  BATCH = 1
 end
 
 def do_bm
-  (1..NUM).to_a.map(&:to_s).each_with_index do |data, i|
-    hashed_data = digest("\0" + data)
-    signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-    timestamp = 1708758140 + i
+  i = 0
+  (1..NUM).to_a.map(&:to_s).each_slice(BATCH) do |data_set|
+    events = data_set.map do |data|
+      hashed_data = digest("\0" + data)
+      signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
+      timestamp = 1708758140 + i
+      i += 1
 
-    event = Event.create! signer: SIGNER_PUBLIC_KEY,
-                          session: "CHAR",
-                          data: data,
-                          hashed_data: hashed_data,
-                          signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                          timestamp: timestamp
-    Rails.logger.info "Created event #{data}"
-    MerkleNode.push_leaf!(event)
-    if !COALESCE or (i + 1) % 50 == 0
-      MerkleNode.untaint! event.session, IdentityDigest
+      Event.create! signer: SIGNER_PUBLIC_KEY,
+                    session: "CHAR",
+                    data: data,
+                    hashed_data: hashed_data,
+                    signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
+                    timestamp: timestamp
     end
-    Rails.logger.info "Created leaf #{data}"
-  end
-  if COALESCE
+    MerkleNode.push_leaves!(events)
     MerkleNode.untaint! "CHAR", IdentityDigest
   end
-  root = MerkleNode.root("CHAR")
 end
 
 namespace :benchmark do

@@ -7,65 +7,97 @@ class MerkleNode < ApplicationRecord
 
   attr_accessor :parent, :children
 
-  # 插入新叶子，应该用事务包裹，不计算哈希，所以事务时长不受哈希计算影响
-  def self.push_leaf!(event)
-    timestamp = event.timestamp
-    session = event.session
+  def self.push_leaves!(events)
+    return if events.empty?
 
-    # 创建叶子 (创建顺序从低到高)
-    to_create_nodes = [{
-      event: event, session: session, begin_ts: timestamp, end_ts: timestamp,
-      level: 0, full: true, calculated_hash: event.hashed_data
-    }]
+    # assume all events in the same session, and ordered by timestamp
+    session = events.first.session
 
-    max_timestamp, = where("session = ? and end_ts < ?", session, timestamp).order(end_ts: :desc).limit(1).pluck :end_ts
+    # create leaf (nodes created from bottom-up)
+    to_create_nodes = events.map do |event|
+      {
+        event_id: event.id, session:, begin_ts: event.timestamp, end_ts: event.timestamp,
+        level: 0, full: true, calculated_hash: event.hashed_data
+      }
+    end
 
+    max_timestamp, = where("session = ? and end_ts < ?", events.first.session, events.first.timestamp).order(end_ts: :desc).limit(1).pluck :end_ts
+
+    root_level = 0
     if max_timestamp
-      # 查询前树最新的节点，每 level 一个
-      frontier = where("session = ? and level > ? and end_ts = ?", session, 0, max_timestamp).order(level: :asc).select(:id, :full, :level).to_a
+      # query newest nodes in previosu tree, including all levels
+      frontier = where("session = ? and level > ? and end_ts = ?", session, 0, max_timestamp).order(level: :asc).pluck(:id, :full, :level)
+      frontier.each do |row|
+        row << nil # [id, full, level, to_create_node]
+        root_level = row[2]
+      end
+    else
+      frontier = []
+    end
+    tainted_nodes = {} # id => [full, end_ts]
 
-      root_level = (frontier.empty? ? 0 : frontier.last.level)
-      # 进位: 低层有多少 full 就创建多少个同层的新节点，直到将一个中层节点变成 full
+    min_timestamp = nil
+    events.each do |event|
+      # perform carried arithmetic in radix-2: create parallel branch aligned to full branches bottom-up
+      # until we fill a middle-layer branch to full
       low_level = true
-      update_node_ids = []
-      taint_node_ids = []
-      frontier.each do |node|
+      frontier.map! do |(id, full, level, to_create_node)|
         if low_level
-          if node.full
-            to_create_nodes << {
-              session: session, begin_ts: timestamp, end_ts: timestamp, level: node.level, full: false
+          if full # parallel branch
+            id = nil
+            full = false
+            to_create_node = {
+              session:, begin_ts: event.timestamp, end_ts: event.timestamp, level:, full:
             }
+            to_create_nodes << to_create_node
           else
-            update_node_ids << node.id
+            full = true
             low_level = false
+            if id
+              tainted_nodes[id] = [full, event.timestamp]
+            else
+              to_create_node[:full] = full
+              to_create_node[:end_ts] = event.timestamp
+            end
           end
         else
-          taint_node_ids << node.id
+          if id
+            tainted_nodes[id] = [full, event.timestamp]
+          else
+            to_create_node[:end_ts] = event.timestamp
+          end
         end
-        node
+        [id, full, level, to_create_node]
       end
 
-      if update_node_ids.size + taint_node_ids.size + to_create_nodes.size != root_level + 1
-        raise "inconsistency in nodes -- update_nodes(#{update_node_ids.size}) + taint_nodes(#{taint_node_ids.size}) + create_nodes(#{to_create_nodes.size}) != levels(#{root_level + 1})"
-      end
-
-      # frontier 各层全满，增加树高
+      # all layers in frontier are full, increase tree height
       if low_level
-        min_timestamp, = where(session: session).order(begin_ts: :asc).limit(1).pluck :begin_ts
-        # 根总是满的
-        to_create_nodes << {
-          session: session, begin_ts: min_timestamp, end_ts: timestamp, level: root_level + 1, full: true
-        }
-      end
-
-      if update_node_ids.present?
-        where(id: update_node_ids).update_all full: true, calculated_hash: nil, end_ts: timestamp
-      end
-      if taint_node_ids.present?
-        where(id: taint_node_ids).update_all calculated_hash: nil, end_ts: timestamp
+        if min_timestamp.nil? and max_timestamp
+          min_timestamp, = where(session:).order(begin_ts: :asc).limit(1).pluck :begin_ts
+        end
+        if min_timestamp
+          # a root is always full
+          root_level += 1
+          to_create_node = {
+            session:, begin_ts: min_timestamp, end_ts: event.timestamp, level: root_level, full: true
+          }
+          to_create_nodes << to_create_node
+          frontier << [nil, true, root_level, to_create_node]
+        else
+          # event is the first leaf, no need to add root
+        end
+        min_timestamp ||= event.timestamp
       end
     end
 
+    reverse_indexed_tainted_nodes = {}
+    tainted_nodes.each do |id, k|
+      (reverse_indexed_tainted_nodes[k] ||= []) << id
+    end
+    reverse_indexed_tainted_nodes.each do |(full, end_ts), ids|
+      # TODO: set updated_at to now()
+      where(id: ids).update_all calculated_hash: nil, full:, end_ts:
+    end
     create to_create_nodes
   end
 
@@ -73,11 +105,11 @@ class MerkleNode < ApplicationRecord
     where(session: session).order(level: :desc).first
   end
 
-  # 更新哈希
+  # rehash tainted nodes in a session
   def self.untaint!(session, hasher)
     hash_cache_by_id = {}
 
-    # single sql to update all nodes
+    # single sql to find all nodes for update
     # upcase first SELECT for proper benchmark
     # TODO: in batch of 1000
     connection.execute(sanitize_sql_array(["SELECT id,
@@ -96,30 +128,26 @@ class MerkleNode < ApplicationRecord
     end
   end
 
-  # 更新 parent 属性
-  def load_parent!
+  def load_parent
     self.parent = MerkleNode.where("session = ? and level = ? and (begin_ts = ? or end_ts = ?)", session, level + 1, begin_ts, end_ts).first
   end
 
-  # 更新 children 属性
-  def load_children!
+  def load_children
     self.children = MerkleNode.where(
       "session = ? and level = ? and (begin_ts = ? or end_ts = ?)", session, level - 1, begin_ts, end_ts
     ).order(begin_ts: :asc).to_a
   end
 
-  # 一个节点的所有先代，按 level 组织起来，并更新 parent 属性
-  def load_ancestors!
+  def load_ancestors
+    # TODO: with recursive CTE
     node = self
     while node
-      node.load_parent!
+      node.load_parent
       node = node.parent
     end
   end
 
-  # 一个节点的所有后代，按 level 组织起来，并更新 children 属性
-  # 返回从低到高排序的节点列表
-  def load_descendants!
+  def load_descendants
     if level == 0
       return []
     end
@@ -139,7 +167,7 @@ class MerkleNode < ApplicationRecord
       end
     end
     self.children = nodes_by_level.last
-    nodes
+    nodes # nodes in bottom-up order
   end
 
   def to_dot_digraph_label
@@ -147,7 +175,7 @@ class MerkleNode < ApplicationRecord
   end
 
   def to_dot_digraph
-    nodes = load_descendants!
+    nodes = load_descendants
     nodes << self
     out = ["digraph G {\n"]
     nodes.each do |d|
@@ -162,7 +190,7 @@ class MerkleNode < ApplicationRecord
     out.join
   end
 
-  # 清理旧节点
+  # truncate old nodes
   def self.truncate(before_id)
     TODO
   end
