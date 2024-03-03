@@ -25,6 +25,12 @@ Result is GraphViz dot
 
 Put it to <https://dreampuf.github.io/GraphvizOnline/> to visualize
 
+benchmarks
+
+```
+bundle exec rake benchmark:bm NUM=500
+```
+
 ## Showcase
 
 - [db/migrate](db/migrate)
