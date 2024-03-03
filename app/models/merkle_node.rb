@@ -78,8 +78,9 @@ class MerkleNode < ApplicationRecord
     hash_cache_by_id = {}
 
     # single sql to update all nodes
+    # upcase first SELECT for proper benchmark
     # TODO: in batch of 1000
-    connection.execute(sanitize_sql_array(["select id,
+    connection.execute(sanitize_sql_array(["SELECT id,
     (select json_build_object('ids', json_agg(n.id), 'hashes', json_agg(n.calculated_hash)) from merkle_nodes n where
     n.session = ? and n.level = m.level - 1 and (n.begin_ts = m.begin_ts or n.end_ts = m.end_ts)) as children
     from merkle_nodes m where m.session = ? and m.calculated_hash is null order by m.level asc", session, session])).each do |row|
