@@ -11,11 +11,6 @@ def digest(m)
   IdentityDigest.digest(m)
 end
 
-def make_new_leaf(event)
-  lineage = MerkleNode.push_leaf!(event)
-  MerkleNode.untaint! event.session, IdentityDigest
-end
-
 SECP256K1 = Secp256k1::Context.create
 # Fixed seed for test
 KEY_PAIR = SECP256K1.key_pair_from_private_key(
@@ -28,24 +23,31 @@ if ENV['NUM']
 else
   NUM = 1000
 end
+if ENV['BATCH']
+  BATCH = ENV['BATCH'].to_i
+else
+  BATCH = 1
+end
 
 def do_bm
-  (1..NUM).to_a.map(&:to_s).each_with_index do |data, i|
-    hashed_data = digest("\0" + data)
-    signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-    timestamp = 1708758140 + i
+  i = 0
+  (1..NUM).to_a.map(&:to_s).each_slice(BATCH) do |data_set|
+    events = data_set.map do |data|
+      hashed_data = digest("\0" + data)
+      signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
+      timestamp = 1708758140 + i
+      i += 1
 
-    event = Event.create! signer: SIGNER_PUBLIC_KEY,
-                          session: "CHAR",
-                          data: data,
-                          hashed_data: hashed_data,
-                          signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                          timestamp: timestamp
-    Rails.logger.info "Created event #{data}"
-    make_new_leaf(event)
-    Rails.logger.info "Created leaf #{data}"
+      Event.create! signer: SIGNER_PUBLIC_KEY,
+                    session: "CHAR",
+                    data: data,
+                    hashed_data: hashed_data,
+                    signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
+                    timestamp: timestamp
+    end
+    MerkleNode.push_leaves!(events)
+    MerkleNode.untaint! "CHAR", IdentityDigest
   end
-  root = MerkleNode.root("CHAR")
 end
 
 namespace :benchmark do
@@ -53,6 +55,8 @@ namespace :benchmark do
     puts "Clearing log"
     path = Rails.root.join('log', 'development.log')
     `echo "" > #{path}`
+    path2 = Rails.root.join('log', 'development.log.0')
+    `echo "" > #{path2}`
   end
 
   task :clear_data do 
@@ -64,6 +68,10 @@ namespace :benchmark do
   task :get_insert_and_update_count_from_log do
     path = Rails.root.join('log', 'development.log')
     log = File.read(path)
+    path2 = Rails.root.join('log', 'development.log.0')
+    if File.exist?(path2)
+      log += File.read(path2)
+    end
     insert_count = log.scan(/INSERT /).count
     update_count = log.scan(/UPDATE /).count
     select_count = log.scan(/SELECT /).count

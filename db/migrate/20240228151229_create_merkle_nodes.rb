@@ -22,24 +22,5 @@ class CreateMerkleNodes < ActiveRecord::Migration[7.2]
       t.integer :level, null: false # 叶子 level=0。任意 parent.level = child.level + 1
       t.timestamps
     end
-
-# 索引，可能过度配置了
-=begin
-
-    add_index :merkle_nodes, :session
-
-    # 叶子节点的 timestamp 需要唯一递增
-    # 所以每个节点的 (session, begin_ts, end_ts) 保持唯一
-    add_index :merkle_nodes, [:session, :begin_ts, :end_ts], unique: true
-
-    add_index :merkle_nodes, [:session, :end_ts]
-
-    # 直接父/子查询需要
-    add_index :merkle_nodes, [:session, :level]
-
-    # 插入需要，用于查询未满节点
-    add_index :merkle_nodes, [:session, :full]
-
-=end
   end
 end

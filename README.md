@@ -28,7 +28,9 @@ Put it to <https://dreampuf.github.io/GraphvizOnline/> to visualize
 benchmarks
 
 ```
-bundle exec rake benchmark:bm NUM=500
+RAILS_ENV=production bundle exec rake benchmark:bm NUM=500
+# batch create
+RAILS_ENV=production bundle exec rake benchmark:bm NUM=5000 BATCH=100
 ```
 
 ## Showcase

@@ -19,7 +19,7 @@ def digest(m)
 end
 
 def make_new_leaf(event)
-  lineage = MerkleNode.push_leaf!(event)
+  lineage = MerkleNode.push_leaves!([event])
   MerkleNode.untaint! event.session, IdentityDigest
 end
 
