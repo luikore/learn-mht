@@ -64,6 +64,10 @@ namespace :benchmark do
   task :get_insert_and_update_count_from_log do
     path = Rails.root.join('log', 'development.log')
     log = File.read(path)
+    path2 = Rails.root.join('log', 'development.log.0')
+    if File.exist?(path2)
+      log += File.read(path2)
+    end
     insert_count = log.scan(/INSERT /).count
     update_count = log.scan(/UPDATE /).count
     select_count = log.scan(/SELECT /).count
