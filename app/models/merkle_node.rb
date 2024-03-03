@@ -13,44 +13,60 @@ class MerkleNode < ApplicationRecord
     session = event.session
 
     # 创建叶子 (创建顺序从低到高)
-    create!(event: event, session: session, begin_ts: timestamp, end_ts: timestamp,
-      level: 0, full: true, calculated_hash: event.hashed_data)
+    to_create_nodes = [{
+      event: event, session: session, begin_ts: timestamp, end_ts: timestamp,
+      level: 0, full: true, calculated_hash: event.hashed_data
+    }]
 
     max_timestamp, = where("session = ? and end_ts < ?", session, timestamp).order(end_ts: :desc).limit(1).pluck :end_ts
 
     if max_timestamp
       # 查询前树最新的节点，每 level 一个
-      frontier = where("session = ? and level > ? and end_ts = ?", session, 0, max_timestamp).order(level: :asc).to_a
+      frontier = where("session = ? and level > ? and end_ts = ?", session, 0, max_timestamp).order(level: :asc).select(:id, :full, :level).to_a
 
+      root_level = (frontier.empty? ? 0 : frontier.last.level)
       # 进位: 低层有多少 full 就创建多少个同层的新节点，直到将一个中层节点变成 full
       low_level = true
-      frontier.map! do |node|
+      update_node_ids = []
+      taint_node_ids = []
+      frontier.each do |node|
         if low_level
           if node.full
-            node = create!(session: session, begin_ts: timestamp, end_ts: timestamp, level: node.level, full: false)
+            to_create_nodes << {
+              session: session, begin_ts: timestamp, end_ts: timestamp, level: node.level, full: false
+            }
           else
-            node.calculated_hash = nil
-            node.full = true
-            node.end_ts = timestamp
-            node.save!
+            update_node_ids << node.id
             low_level = false
           end
         else
-          node.calculated_hash = nil
-          node.end_ts = timestamp
-          node.save!
+          taint_node_ids << node.id
         end
         node
+      end
+
+      if update_node_ids.size + taint_node_ids.size + to_create_nodes.size != root_level + 1
+        raise "inconsistency in nodes -- update_nodes(#{update_node_ids.size}) + taint_nodes(#{taint_node_ids.size}) + create_nodes(#{to_create_nodes.size}) != levels(#{root_level + 1})"
       end
 
       # frontier 各层全满，增加树高
       if low_level
         min_timestamp, = where(session: session).order(begin_ts: :asc).limit(1).pluck :begin_ts
-        largest_level = (frontier.empty? ? 0 : frontier.last.level)
         # 根总是满的
-        create!(session: session, begin_ts: min_timestamp, end_ts: timestamp, level: largest_level + 1, full: true)
+        to_create_nodes << {
+          session: session, begin_ts: min_timestamp, end_ts: timestamp, level: root_level + 1, full: true
+        }
+      end
+
+      if update_node_ids.present?
+        where(id: update_node_ids).update_all full: true, calculated_hash: nil, end_ts: timestamp
+      end
+      if taint_node_ids.present?
+        where(id: taint_node_ids).update_all calculated_hash: nil, end_ts: timestamp
       end
     end
+
+    create to_create_nodes
   end
 
   def self.root(session)
@@ -59,10 +75,23 @@ class MerkleNode < ApplicationRecord
 
   # 更新哈希
   def self.untaint!(session, hasher)
-    where(session: session, calculated_hash: nil).order(level: :asc).each do |node|
-      node.load_children!
-      h = hasher.digest("\x01" + node.children.map(&:calculated_hash).join)
-      where(id: node.id).update calculated_hash: h
+    hash_cache_by_id = {}
+
+    # single sql to update all nodes
+    # TODO: in batch of 1000
+    connection.execute(sanitize_sql_array(["select id,
+    (select json_build_object('ids', json_agg(n.id), 'hashes', json_agg(n.calculated_hash)) from merkle_nodes n where
+    n.session = ? and n.level = m.level - 1 and (n.begin_ts = m.begin_ts or n.end_ts = m.end_ts)) as children
+    from merkle_nodes m where m.session = ? and m.calculated_hash is null order by m.level asc", session, session])).each do |row|
+      parent_id = row["id"]
+      children = JSON.parse row["children"]
+      raise "bad children size: #{children["ids"].size} for #{row["id"]}" if children["ids"].size > 2
+      children_hashes = children["ids"].zip(children["hashes"]).to_a.sort_by(&:first).map do |(child_id, child_hash)|
+        child_hash ||= hash_cache_by_id[child_id]
+      end.join
+      h = hasher.digest("\x01#{children_hashes}")
+      where(id: parent_id).update_all calculated_hash: h
+      hash_cache_by_id[parent_id] = h
     end
   end
 
@@ -74,7 +103,7 @@ class MerkleNode < ApplicationRecord
   # 更新 children 属性
   def load_children!
     self.children = MerkleNode.where(
-      "session = ? and level = ? and begin_ts >= ? and end_ts <= ?", session, level - 1, begin_ts, end_ts
+      "session = ? and level = ? and (begin_ts = ? or end_ts = ?)", session, level - 1, begin_ts, end_ts
     ).order(begin_ts: :asc).to_a
   end
 

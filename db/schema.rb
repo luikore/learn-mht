@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2024_02_28_151229) do
+ActiveRecord::Schema[7.2].define(version: 2024_03_03_103518) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
@@ -34,6 +34,10 @@ ActiveRecord::Schema[7.2].define(version: 2024_02_28_151229) do
     t.integer "level", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.index ["begin_ts"], name: "index_merkle_nodes_on_begin_ts"
+    t.index ["calculated_hash"], name: "index_merkle_nodes_on_calculated_hash", where: "(calculated_hash IS NULL)"
+    t.index ["end_ts"], name: "index_merkle_nodes_on_end_ts"
     t.index ["event_id"], name: "index_merkle_nodes_on_event_id"
+    t.index ["session"], name: "index_merkle_nodes_on_session"
   end
 end
