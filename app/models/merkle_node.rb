@@ -12,7 +12,7 @@ class MerkleNode < ApplicationRecord
 
     # assume all events in the same session, and ordered by timestamp
     session = events.first.session
-
+  
     # create leaf (nodes created from bottom-up)
     to_create_nodes = events.map do |event|
       {
@@ -99,6 +99,13 @@ class MerkleNode < ApplicationRecord
       where(id: ids).update_all calculated_hash: nil, full:, end_ts:
     end
     create to_create_nodes
+  end
+
+  def self.push_leaves_with_lock!(events)
+    lock_key = "push_leaves_#{events.first.session}"
+    AdvisoryLock.with_transaction_lock(lock_key) do
+      push_leaves! events
+    end
   end
 
   def self.root(session)

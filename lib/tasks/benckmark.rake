@@ -45,7 +45,7 @@ def do_bm
                     signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
                     timestamp: timestamp
     end
-    MerkleNode.push_leaves!(events)
+    MerkleNode.push_leaves_with_lock!(events)
     MerkleNode.untaint! "CHAR", IdentityDigest
   end
 end
