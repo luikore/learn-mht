@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 
 class IdentityDigest
   def self.digest(s)
@@ -18,13 +19,13 @@ KEY_PAIR = SECP256K1.key_pair_from_private_key(
 )
 SIGNER_PUBLIC_KEY = Secp256k1::Util.bin_to_hex(KEY_PAIR.public_key.compressed)
 
-if ENV['NUM']
-  NUM = ENV['NUM'].to_i
+if ENV["NUM"]
+  NUM = ENV["NUM"].to_i
 else
   NUM = 1000
 end
-if ENV['BATCH']
-  BATCH = ENV['BATCH'].to_i
+if ENV["BATCH"]
+  BATCH = ENV["BATCH"].to_i
 else
   BATCH = 1
 end
@@ -51,24 +52,24 @@ def do_bm
 end
 
 namespace :benchmark do
-  task :clear_log do 
+  task :clear_log do
     puts "Clearing log"
-    path = Rails.root.join('log', 'development.log')
+    path = Rails.root.join("log", "development.log")
     `echo "" > #{path}`
-    path2 = Rails.root.join('log', 'development.log.0')
+    path2 = Rails.root.join("log", "development.log.0")
     `echo "" > #{path2}`
   end
 
-  task :clear_data do 
+  task :clear_data do
     puts "Clearing data, events and merkle_nodes"
     Event.delete_all
     MerkleNode.delete_all
   end
 
   task :get_insert_and_update_count_from_log do
-    path = Rails.root.join('log', 'development.log')
+    path = Rails.root.join("log", "development.log")
     log = File.read(path)
-    path2 = Rails.root.join('log', 'development.log.0')
+    path2 = Rails.root.join("log", "development.log.0")
     if File.exist?(path2)
       log += File.read(path2)
     end
@@ -80,9 +81,9 @@ namespace :benchmark do
     puts "Select count: #{select_count}"
   end
 
-  desc 'Benchmark for creating events and merkle_nodes'
+  desc "Benchmark for creating events and merkle_nodes"
   task bm: [:environment, :clear_data, :clear_log] do
-    require 'benchmark'
+    require "benchmark"
 
     Benchmark.bm do |x|
       x.report("create #{NUM} events") do

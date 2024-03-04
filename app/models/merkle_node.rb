@@ -12,7 +12,7 @@ class MerkleNode < ApplicationRecord
 
     # assume all events in the same session, and ordered by timestamp
     session = events.first.session
-  
+
     # create leaf (nodes created from bottom-up)
     to_create_nodes = events.map do |event|
       {
