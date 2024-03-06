@@ -45,6 +45,8 @@ RAILS_ENV=production bundle exec rake benchmark:bm NUM=5000 BATCH=100
 - https://transparency.dev/how-to-design-a-verifiable-system/
 - https://github.com/google/trillian/tree/master/merkle
 - https://github.com/google/trillian/tree/master/log
+- https://github.com/transparency-dev/formats/blob/main/log/README.md#checkpoint-format
+- https://github.com/transparency-dev
 - https://datatracker.ietf.org/doc/html/rfc9162#name-merkle-trees
 - https://aly.arriqaaq.com/merkle-tree-and-verifiable-data-structures/
 - https://github.com/mpalmer/merkle-hash-tree
