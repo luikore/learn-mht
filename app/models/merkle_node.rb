@@ -138,6 +138,12 @@ class MerkleNode < ApplicationRecord
     ).order(begin_ts: :asc).to_a
   end
 
+  def load_children_covering(child_end_ts)
+    self.children = MerkleNode.where(
+      "session = ? and level = ? and (begin_ts = ? or end_ts = ?) and begin_ts <= ?", session, level - 1, begin_ts, end_ts, child_end_ts
+    ).order(begin_ts: :asc).to_a
+  end
+
   def load_ancestors
     # TODO: with recursive CTE
     node = self
@@ -168,6 +174,45 @@ class MerkleNode < ApplicationRecord
     end
     self.children = nodes_by_level.last
     nodes # nodes in bottom-up order
+  end
+
+  # An (inclusion) proof: the nodes required to compute the hash of timestamp.
+  # To verify:
+  #
+  #   proof.each{|n| n.calculated_hash ||= hasher.digest("\x01#{n.children.map(&:calculated_hash).join}") }
+  #   proof.last&.calculated_hash == expected_hash
+  #
+  # To check consistency of 2 hashes we can just verify inclusion proof of both timestamps
+  def self.proof(session, timestamp)
+    leaf = MerkleNode.where("session = ? and end_ts = ? and level = 0", session, timestamp).first
+    if leaf.nil?
+      return []
+    end
+    # TODO: min_ts for each session can be cached in memory
+    min_ts, = MerkleNode.where("session = ?", session).order(begin_ts: :asc).limit(1).pluck :begin_ts
+
+    # begin_ts = min_ts, means the node was once a root
+    root_at_ts = MerkleNode.where("session = ? and begin_ts = ? and end_ts >= ?", session, min_ts, timestamp).order(level: :asc).first
+
+    # search down, until the leaf
+    root_at_ts.calculated_hash = nil
+    path = [root_at_ts]
+    node = root_at_ts
+    while node.level > leaf.level
+      node.load_children_covering timestamp
+      if not (1..2).cover? node.children.size
+        raise "bad children size: #{node.children.size} for #{node.id}"
+      end
+      node = node.children.last
+      if node.level > leaf.level
+        node.calculated_hash = nil
+      else
+        raise "leaf not matched" if node.id != leaf.id
+      end
+      path << node
+    end
+    path.reverse!
+    path
   end
 
   def to_dot_digraph_label
