@@ -47,6 +47,8 @@ root = MerkleNode.root("CHAR")
 puts root.calculated_hash
 File.write 'char.dot', root.to_dot_digraph
 
+saved_timestamp = nil
+saved_hash = nil
 (1..100).to_a.map(&:to_s).each_with_index do |data, i|
   hashed_data = digest("\0" + data)
   signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
@@ -59,10 +61,26 @@ File.write 'char.dot', root.to_dot_digraph
                         signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
                         timestamp: timestamp
   make_new_leaf(event)
+
+  if i == 20
+    saved_timestamp = timestamp
+    saved_hash = MerkleNode.root("NUMBER").calculated_hash
+  end
 end
 root = MerkleNode.root("NUMBER")
 puts root.calculated_hash
 File.write 'number.dot', root.to_dot_digraph
 puts ""
+
+# proof
+proof = MerkleNode.proof("NUMBER", saved_timestamp)
+proof.each do |n|
+  n.calculated_hash ||= IdentityDigest.digest "\0#{n.children.map(&:calculated_hash).join}"
+end
+actual_hash = proof.last.calculated_hash
+puts "proof size: #{proof.size}"
+puts "proof expected: #{saved_hash}"
+puts "got: #{actual_hash}"
+puts "match: #{actual_hash == saved_hash}"
 
 # binding.irb
