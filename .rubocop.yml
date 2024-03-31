@@ -1,3 +1,4 @@
+# Omakase Ruby styling for Rails
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
 # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`

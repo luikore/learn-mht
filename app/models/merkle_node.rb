@@ -127,7 +127,7 @@ class MerkleNode < ApplicationRecord
       children = JSON.parse row["children"]
       raise "bad children size: #{children["ids"].size} for #{row["id"]}" if children["ids"].size > 2
       children_hashes = children["ids"].zip(children["hashes"]).to_a.sort_by(&:first).map do |(child_id, child_hash)|
-        child_hash ||= hash_cache_by_id[child_id]
+        child_hash || hash_cache_by_id[child_id]
       end.join
       h = hasher.digest("\x01#{children_hashes}")
       where(id: parent_id).update_all calculated_hash: h
