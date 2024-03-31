@@ -13,4 +13,14 @@ Rails.application.routes.draw do
 
   # Defines the root path route ("/")
   # root "posts#index"
+
+  namespace :bridging do
+    root to: "home#index"
+
+    resources :events, only: %i[create] do
+      collection do
+        post "batch" => "events#batch_create"
+      end
+    end
+  end
 end

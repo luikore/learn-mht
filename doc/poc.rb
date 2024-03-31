@@ -13,15 +13,7 @@ class IdentityDigest
   end
 end
 
-# https://github.com/OpenZeppelin/merkle-tree?tab=readme-ov-file#standard-merkle-trees
-def digest(m)
-  IdentityDigest.digest(m)
-end
-
-def make_new_leaf(event)
-  lineage = MerkleNode.push_leaves!([event])
-  MerkleNode.untaint! event.session, IdentityDigest
-end
+MerkleNode.hasher = IdentityDigest
 
 SECP256K1 = Secp256k1::Context.create
 # Fixed seed for test
@@ -30,75 +22,67 @@ KEY_PAIR = SECP256K1.key_pair_from_private_key(
 )
 SIGNER_PUBLIC_KEY = Secp256k1::Util.bin_to_hex(KEY_PAIR.public_key.compressed)
 
+saved_hashes = {}
 ("A".."Z").to_a.map(&:to_s).each_with_index do |data, i|
-  hashed_data = digest("\0" + data)
-  signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
+  # https://github.com/OpenZeppelin/merkle-tree?tab=readme-ov-file#standard-merkle-trees
+  hashed_data = MerkleNode.hasher.digest("\0" + data)
+  signature = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
+  nonce = i
   timestamp = 1708758140 + i
 
-  event = Event.create! signer: SIGNER_PUBLIC_KEY,
-                        session: "CHAR",
-                        data: data,
-                        hashed_data: hashed_data,
-                        signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                        timestamp: timestamp
-  make_new_leaf(event)
+  event = Event.create!(
+    raw: data,
+    raw_hash: hashed_data,
+    signature: Secp256k1::Util.bin_to_hex(signature.serialized),
+    timestamp: timestamp,
+    session: "NUMBER",
+    nonce: nonce,
+    signer: SIGNER_PUBLIC_KEY
+  )
+
+  saved_hashes[nonce] = event.merkle_node.tree_root.calculated_hash
 end
-root = MerkleNode.root("CHAR")
-puts root.calculated_hash
-File.write 'char.dot', root.to_dot_digraph
-
-saved_timestamp = nil
-saved_hash = nil
-(1..100).to_a.map(&:to_s).each_with_index do |data, i|
-  hashed_data = digest("\0" + data)
-  signed_hashed_data = SECP256K1.sign_schnorr(KEY_PAIR, Digest::Keccak.digest(data, 256))
-  timestamp = 1708758140 + i
-
-  event = Event.create! signer: SIGNER_PUBLIC_KEY,
-                        session: "NUMBER",
-                        data: data,
-                        hashed_data: hashed_data,
-                        signed_hashed_data: Secp256k1::Util.bin_to_hex(signed_hashed_data.serialized),
-                        timestamp: timestamp
-  make_new_leaf(event)
-
-  if i == 20
-    saved_timestamp = timestamp
-    saved_hash = MerkleNode.root("NUMBER").calculated_hash
-  end
-end
-root = MerkleNode.root("NUMBER")
-puts root.calculated_hash
-File.write 'number.dot', root.to_dot_digraph
+root = Event.where(session: "NUMBER").first.merkle_tree_root
+puts "root hash: #{root.calculated_hash}"
+# File.write "tmp/number.dot", root.to_dot_digraph
 puts ""
 
 # proof
-proof = MerkleNode.proof("NUMBER", saved_timestamp)
+Event.of_signer_and_session(SIGNER_PUBLIC_KEY, "NUMBER").each do |event|
+  puts "Event nonce: #{event.nonce}"
 
-puts "===="
-proof.each do |n|
-  if n.event_id.present?
-    puts "#{n.calculated_hash}"
-  else
-    puts "#{n.calculated_hash} Children(#{n.children.size}): #{n.children.map(&:calculated_hash).join(", ")} Full: #{n.full?}"
+  merkle_node = event.merkle_node
+  proof = merkle_node.inclusion_proof
+
+  puts "===="
+  proof.each do |n|
+    if n.event_id.present?
+      puts "Event: #{n.calculated_hash}"
+    else
+      puts "Children(#{n.children.size}): #{n.children.map(&:calculated_hash).join(", ")} Full: #{n.full?}"
+    end
   end
-end
-puts "===="
+  puts "===="
 
-proof.each do |n|
-  n.calculated_hash ||= IdentityDigest.digest "\0#{n.children.map(&:calculated_hash).join}"
-end
+  proof.each do |n|
+    n.calculated_hash ||=
+      if n.children
+        MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join)
+      else
+        event.raw_hash
+      end
+  end
+  actual_hash = proof.last.calculated_hash
+  saved_hash = saved_hashes.fetch(event.nonce)
 
-puts "===="
-proof.each do |n|
-  puts n.calculated_hash
+  puts "Expected: #{saved_hash}"
+  puts "Got: #{actual_hash}"
+  if actual_hash == saved_hash
+    puts "Verified"
+  else
+    raise "Proof mismatched"
+  end
+  puts ""
 end
-puts "===="
-
-actual_hash = proof.last.calculated_hash
-puts "proof size: #{proof.size}"
-puts "proof expected: #{saved_hash}"
-puts "got: #{actual_hash}"
-puts "match: #{actual_hash == saved_hash}"
 
 # binding.irb
