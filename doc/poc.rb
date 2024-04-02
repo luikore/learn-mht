@@ -74,9 +74,27 @@ puts ""
 
 # proof
 proof = MerkleNode.proof("NUMBER", saved_timestamp)
+
+puts "===="
+proof.each do |n|
+  if n.event_id.present?
+    puts "#{n.calculated_hash}"
+  else
+    puts "#{n.calculated_hash} Children(#{n.children.size}): #{n.children.map(&:calculated_hash).join(", ")} Full: #{n.full?}"
+  end
+end
+puts "===="
+
 proof.each do |n|
   n.calculated_hash ||= IdentityDigest.digest "\0#{n.children.map(&:calculated_hash).join}"
 end
+
+puts "===="
+proof.each do |n|
+  puts n.calculated_hash
+end
+puts "===="
+
 actual_hash = proof.last.calculated_hash
 puts "proof size: #{proof.size}"
 puts "proof expected: #{saved_hash}"
