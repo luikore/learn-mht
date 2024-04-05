@@ -3,16 +3,16 @@
 class CreateEvents < ActiveRecord::Migration[7.2]
   def change
     create_table :events do |t|
-      t.string :raw, null: false
-      t.string :raw_hash, null: false
-      t.string :signature, null: false
-      t.integer :timestamp, null: false
-      t.string :session, null: false
-      t.integer :nonce, null: false
-      t.string :signer, null: false
+      t.string :eid, null: false, index: { unique: true }
+      t.string :pubkey, null: false, index: true
+      t.integer :kind, null: false
+      t.jsonb :tags, array: true, default: []
+      t.string :content, null: false
+      t.string :sig, null: false
 
-      t.index %i[signer session]
-      t.index %i[signer session nonce], unique: true
+      t.datetime :created_at, null: false
+
+      t.index %i[pubkey created_at], unique: true
     end
   end
 end

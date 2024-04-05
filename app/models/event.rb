@@ -1,52 +1,55 @@
 # frozen_string_literal: true
 
 class Event < ApplicationRecord
-  has_one :merkle_node, dependent: :restrict_with_exception
+  include Nostr::Nip1
 
-  scope :of_signer_and_session, ->(signer, session) { where(signer: signer, session: session) }
+  scope :of_pubkey, ->(pubkey) { where(pubkey:) }
+  scope :of_topic, ->(topic) { where(topic:) }
+  scope :of_session, ->(session) { where(session:) }
+
+  has_one :merkle_node, dependent: :restrict_with_exception
 
   after_create :add_to_merkle_tree
 
-  validates :raw, :raw_hash, :signature, :timestamp, :session, :nonce, :signer,
-            presence: true
-
-  validates :nonce,
-            numericality: {
-              only_integer: true,
-              greater_than_or_equal_to: 0
-            }, uniqueness: {
-              scope: %i[signer session]
-            }
-
-  # This is strict, but we don't do this for now
-  # validates :nonce,
-  #           comparison: {
-  #             equal_to: ->(current) {
-  #               of_signer_and_session(current.signer, current.session)
-  #                 .order(nonce: :desc)
-  #                 .limit(1)
-  #                 .pluck(:nonce)
-  #                 .first || 0
-  #             }
-  #           }
-
-  validates :nonce,
+  # A publisher must not send events in the same time which makes harder to sort them.
+  validates :created_at,
+            uniqueness: {
+              scope: :pubkey
+            },
             comparison: {
               greater_than: ->(current) {
-                of_signer_and_session(current.signer, current.session)
-                  .order(nonce: :desc)
+                of_pubkey(current.pubkey)
+                  .order(created_at: :desc)
                   .limit(1)
-                  .pluck(:nonce)
-                  .first || -1
+                  .pluck(:created_at)
+                  .first || 0
               }
             }
+
+  validates :topic,
+            presence: true,
+            length: { is: 64 },
+            format: { with: /\A\h+\z/ }
+
+  validates :session,
+            presence: true,
+            length: { maximum: 4 }
+
+  before_validation do
+    self.session = tags.find { |tag| tag[0] == "s" }&.[](1)
+    self.topic = tags.find { |tag| tag[0] == "t" }&.[](1)
+
+    # TODO: TEST ONLY
+    self.session ||= "test"
+    self.topic ||= Digest::Keccak256.digest("test")
+  end
 
   def readonly?
     persisted?
   end
 
   def merkle_tree_hash
-    Digest::Keccak256.digest([signer, session].join)
+    Digest::Keccak256.digest([pubkey, topic, session].join)
   end
 
   def merkle_tree_root
@@ -55,6 +58,22 @@ class Event < ApplicationRecord
 
   def inclusion_proof
     merkle_node.inclusion_proof
+  end
+
+  class << self
+    def from_raw(nip1_json)
+      return new unless nip1_json
+
+      new(
+        eid: nip1_json.fetch("id"),
+        pubkey: nip1_json.fetch("pubkey"),
+        created_at: nip1_json.fetch("created_at"),
+        kind: nip1_json.fetch("kind"),
+        tags: nip1_json.fetch("tags"),
+        content: nip1_json.fetch("content"),
+        sig: nip1_json.fetch("sig")
+      )
+    end
   end
 
   private

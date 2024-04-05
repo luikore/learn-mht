@@ -5,8 +5,9 @@ class MerkleNode < ApplicationRecord
 
   belongs_to :event, optional: true
 
-  validates :tree_hash, :begin_nonce, :end_nonce, :level,
-            presence: true
+  validates :tree_hash, :begin_timestamp, :end_timestamp, :level,
+            presence: true,
+            allow_blank: false
 
   class_attribute :hasher, default: Digest::Keccak256
   attr_accessor :parent, :children
@@ -19,44 +20,60 @@ class MerkleNode < ApplicationRecord
     MerkleNode.of_tree(tree_hash).order(level: :desc).first!
   end
 
-  # An (inclusion) proof: the nodes required to compute the hash of nonce.
+  def calculate_hash
+    self.calculated_hash ||=
+      if event
+        event.eid
+      else
+        load_children if children.nil?
+
+        MerkleNode.calculate_hash(children.map(&:calculate_hash).join)
+      end
+  end
+
+  def calculate_hash!
+    self.calculated_hash = nil
+    calculated_hash
+  end
+
+  # An (inclusion) proof: the nodes required to compute the hash of timestamp.
   # To verify:
   #
   #   proof.each{|n| n.calculated_hash ||= MerkleNode.hasher.digest("\x01#{n.children.map(&:calculated_hash).join}") }
   #   proof.last&.calculated_hash == expected_hash
   #
-  # To check consistency of 2 hashes we can just verify inclusion proof of both nonce
+  # To check consistency of 2 hashes we can just verify inclusion proof of both timestamp
   def inclusion_proof
     return [] unless event
 
     tree_hash = event.merkle_tree_hash
-    nonce = event.nonce
-    leaf = MerkleNode.of_tree(tree_hash).find_by!(end_nonce: nonce, level: 0)
+    timestamp = event.created_at.to_i
+    leaf = MerkleNode.of_tree(tree_hash).find_by!(end_timestamp: timestamp, level: 0)
     if leaf.nil?
       return []
     end
-    # TODO: min_nonce for each tree can be cached in memory
-    min_nonce =
+    # TODO: min_timestamp for each tree can be cached in memory
+    min_timestamp =
       MerkleNode
         .of_tree(tree_hash)
-        .order(begin_nonce: :asc)
+        .order(begin_timestamp: :asc)
         .limit(1)
-        .pluck(:begin_nonce)
+        .pluck(:begin_timestamp)
         .first
 
-    # begin_nonce = min_nonce, means the node was once a root
-    root_at_nonce =
+    # begin_timestamp = min_timestamp, means the node was once a root
+    root_at_timestamp =
       MerkleNode
         .of_tree(tree_hash)
         .order(level: :asc)
-        .find_by!("begin_nonce = ? and end_nonce >= ?", min_nonce, nonce)
+        .find_by!("begin_timestamp = ? and end_timestamp >= ?", min_timestamp, timestamp)
 
     # search down, until the leaf
-    root_at_nonce.calculated_hash = nil
-    path = [root_at_nonce]
-    node = root_at_nonce
+    root_at_timestamp.calculated_hash = nil
+    path = [root_at_timestamp]
+    node = root_at_timestamp
     while node.level > leaf.level
-      node.load_children_covering nonce
+      node.load_children_covering timestamp
       unless (1..2).cover? node.children.size
         raise "bad children size: #{node.children.size} for #{node.id}"
       end
@@ -75,7 +92,9 @@ class MerkleNode < ApplicationRecord
   def self.push_leaves!(events)
     return if events.empty?
 
-    # assume all events in the same tree, and ordered by nonce
+    # TODO: check events' topic, session, and sorted
+
+    # assume all events in the same tree, and ordered by timestamp
     tree_hash = events.first.merkle_tree_hash
 
     # create leaf (nodes created from bottom-up)
@@ -83,26 +102,26 @@ class MerkleNode < ApplicationRecord
       {
         tree_hash:,
         event_id: event.id,
-        calculated_hash: event.raw_hash,
-        begin_nonce: event.nonce, end_nonce: event.nonce,
+        calculated_hash: event.eid,
+        begin_timestamp: event.created_at.to_i, end_timestamp: event.created_at.to_i,
         level: 0, full: true
       }
     end
 
-    max_nonce =
+    max_timestamp =
       of_tree(tree_hash)
-        .where("end_nonce < ?", events.first.nonce)
-        .order(end_nonce: :desc)
+        .where("end_timestamp < ?", events.first.created_at.to_i)
+        .order(end_timestamp: :desc)
         .limit(1)
-        .pluck(:end_nonce)
+        .pluck(:end_timestamp)
         .first
 
     root_level = 0
-    if max_nonce
+    if max_timestamp
       # query newest nodes in previous tree, including all levels
       frontiers =
         of_tree(tree_hash)
-          .where("level > ? and end_nonce = ?", 0, max_nonce)
+          .where("level > ? and end_timestamp = ?", 0, max_timestamp)
           .order(level: :asc)
           .pluck(:id, :full, :level)
       frontiers.each do |row|
@@ -112,9 +131,9 @@ class MerkleNode < ApplicationRecord
     else
       frontiers = []
     end
-    tainted_nodes = {} # id => [full, end_nonce]
+    tainted_nodes = {} # id => [full, end_timestamp]
 
-    min_nonce = nil
+    min_timestamp = nil
     events.each do |event|
       # perform carried arithmetic in radix-2: create parallel branch aligned to full branches bottom-up
       # until we fill a middle-layer branch to full
@@ -125,24 +144,24 @@ class MerkleNode < ApplicationRecord
             id = nil
             full = false
             to_create_node = {
-              tree_hash:, begin_nonce: event.nonce, end_nonce: event.nonce, level:, full:
+              tree_hash:, begin_timestamp: event.created_at.to_i, end_timestamp: event.created_at.to_i, level:, full:
             }
             to_create_nodes << to_create_node
           else
             full = true
             low_level = false
             if id
-              tainted_nodes[id] = [full, event.nonce]
+              tainted_nodes[id] = [full, event.created_at.to_i]
             else
               to_create_node[:full] = full
-              to_create_node[:end_nonce] = event.nonce
+              to_create_node[:end_timestamp] = event.created_at.to_i
             end
           end
         else
           if id
-            tainted_nodes[id] = [full, event.nonce]
+            tainted_nodes[id] = [full, event.created_at.to_i]
           else
-            to_create_node[:end_nonce] = event.nonce
+            to_create_node[:end_timestamp] = event.created_at.to_i
           end
         end
         [id, full, level, to_create_node]
@@ -150,26 +169,26 @@ class MerkleNode < ApplicationRecord
 
       # all layers in frontiers are full, increase tree height
       if low_level
-        if min_nonce.nil? and max_nonce
-          min_nonce =
+        if min_timestamp.nil? and max_timestamp
+          min_timestamp =
             of_tree(tree_hash)
-              .order(begin_nonce: :asc)
+              .order(begin_timestamp: :asc)
               .limit(1)
-              .pluck(:begin_nonce)
+              .pluck(:begin_timestamp)
               .first
         end
-        if min_nonce
+        if min_timestamp
           # a root is always full
           root_level += 1
           to_create_node = {
-            tree_hash:, begin_nonce: min_nonce, end_nonce: event.nonce, level: root_level, full: true
+            tree_hash:, begin_timestamp: min_timestamp, end_timestamp: event.created_at.to_i, level: root_level, full: true
           }
           to_create_nodes << to_create_node
           frontiers << [nil, true, root_level, to_create_node]
         else
           # event is the first leaf, no need to add root
         end
-        min_nonce ||= event.nonce
+        min_timestamp ||= event.created_at.to_i
       end
     end
 
@@ -177,9 +196,9 @@ class MerkleNode < ApplicationRecord
     tainted_nodes.each do |id, k|
       (reverse_indexed_tainted_nodes[k] ||= []) << id
     end
-    reverse_indexed_tainted_nodes.each do |(full, end_nonce), ids|
+    reverse_indexed_tainted_nodes.each do |(full, end_timestamp), ids|
       # TODO: set updated_at to now()
-      where(id: ids).update_all calculated_hash: nil, full:, end_nonce:
+      where(id: ids).update_all calculated_hash: nil, full:, end_timestamp:
     end
     create! to_create_nodes
   end
@@ -204,7 +223,7 @@ class MerkleNode < ApplicationRecord
     # TODO: in batch of 1000
     connection.execute(sanitize_sql_array(["SELECT id,
     (select json_build_object('ids', json_agg(n.id), 'hashes', json_agg(n.calculated_hash)) from merkle_nodes n where
-    n.tree_hash = ? and n.level = m.level - 1 and (n.begin_nonce = m.begin_nonce or n.end_nonce = m.end_nonce)) as children
+    n.tree_hash = ? and n.level = m.level - 1 and (n.begin_timestamp = m.begin_timestamp or n.end_timestamp = m.end_timestamp)) as children
     from merkle_nodes m where m.tree_hash = ? and m.calculated_hash is null order by m.level asc", tree_hash, tree_hash])).each do |row|
       parent_id = row["id"]
       children = JSON.parse row["children"]
@@ -225,28 +244,28 @@ class MerkleNode < ApplicationRecord
   def load_parent
     self.parent = MerkleNode
                     .of_tree(tree_hash)
-                    .find_by("level = ? and (begin_nonce = ? or end_nonce = ?)", level + 1, begin_nonce, end_nonce)
+                    .find_by("level = ? and (begin_timestamp = ? or end_timestamp = ?)", level + 1, begin_timestamp, end_timestamp)
   end
 
   def load_children
     self.children = MerkleNode
                       .of_tree(tree_hash)
                       .where(
-                        "level = ? and (begin_nonce = ? or end_nonce = ?)",
-                        level - 1, begin_nonce, end_nonce
+                        "level = ? and (begin_timestamp = ? or end_timestamp = ?)",
+                        level - 1, begin_timestamp, end_timestamp
                       )
-                      .order(begin_nonce: :asc)
+                      .order(begin_timestamp: :asc)
                       .to_a
   end
 
-  def load_children_covering(child_end_nonce)
+  def load_children_covering(child_end_timestamp)
     self.children = MerkleNode
                       .of_tree(tree_hash)
                       .where(
-                        "level = ? and (begin_nonce = ? or end_nonce = ?) and begin_nonce <= ?",
-                        level - 1, begin_nonce, end_nonce, child_end_nonce
+                        "level = ? and (begin_timestamp = ? or end_timestamp = ?) and begin_timestamp <= ?",
+                        level - 1, begin_timestamp, end_timestamp, child_end_timestamp
                       )
-                      .order(begin_nonce: :asc)
+                      .order(begin_timestamp: :asc)
                       .to_a
   end
 
@@ -266,18 +285,18 @@ class MerkleNode < ApplicationRecord
     nodes = MerkleNode
               .of_tree(tree_hash)
               .where(
-                "begin_nonce >= ? and end_nonce <= ? and level < ?",
-                begin_nonce, end_nonce, level
+                "begin_timestamp >= ? and end_timestamp <= ? and level < ?",
+                begin_timestamp, end_timestamp, level
               )
-              .order(level: :asc, begin_nonce: :asc)
+              .order(level: :asc, begin_timestamp: :asc)
               .to_a
     nodes_by_level = nodes.group_by(&:level).sort_by(&:first).map(&:last)
     nodes_by_level.each_cons(2) do |leafs, branches|
-      branches_by_begin_nonce = branches.group_by(&:begin_nonce)
-      branches_by_end_nonce = branches.group_by(&:end_nonce)
+      branches_by_begin_timestamp = branches.group_by(&:begin_timestamp)
+      branches_by_end_timestamp = branches.group_by(&:end_timestamp)
       leafs.each do |child|
-        parent = branches_by_begin_nonce[child.begin_nonce]&.first
-        parent ||= branches_by_end_nonce[child.end_nonce]&.first
+        parent = branches_by_begin_timestamp[child.begin_timestamp]&.first
+        parent ||= branches_by_end_timestamp[child.end_timestamp]&.first
         (parent.children ||= []) << child
       end
     end

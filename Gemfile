@@ -28,12 +28,15 @@ gem "redis", ">= 4.0.1"
 # gem "bcrypt", "~> 3.1.7"
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
-gem "tzinfo-data", platforms: %i[ windows jruby ]
+gem "tzinfo-data", platforms: %i[windows jruby]
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false
 
 gem "with_advisory_lock"
+
+gem "pagy"
+gem "pagy_cursor", github: "jasl/pagy-cursor", branch: "pagy-8"
 
 gem "rbsecp256k1"
 gem "keccak"

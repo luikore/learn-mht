@@ -3,12 +3,12 @@
 module Bridging
   class EventsController < Bridging::ApplicationController
     def create
-      @event = Event.new event_params
+      @event = Event.from_raw(event_params)
 
       if @event.save
         render json: {
           status: "ok",
-          event: event_json(@event)
+          event: @event.raw_json
         }
       else
         render json: {
@@ -23,14 +23,14 @@ module Bridging
     def batch_create
       error = nil
       Event.transaction do
-        events_params.each_with_index do |permitted_params, i|
-          # Don't use batch insert for now because we want to validate the nonce here
+        events_params.each_with_index do |nip1_json, i|
+          # Don't use batch insert for now because we want to validate data here
           # Could be optimize in the future
-          event = Event.new(permitted_params)
+          event = Event.from_raw(nip1_json)
           unless event.save
-            if event.errors[:nonce].any?
-              next
-            end
+            # if event.errors[:sig].any?
+            #   next
+            # end
 
             error = {
               index: i,
@@ -56,27 +56,11 @@ module Bridging
     private
 
     def event_params
-      params.require(:event).permit(
-        :raw, :raw_hash, :signature, :timestamp, :session, :nonce, :signer
-      )
+      params.require(:event)
     end
 
     def events_params
-      params.slice(:events).permit(events: [
-        :raw, :raw_hash, :signature, :timestamp, :session, :nonce, :signer
-      ]).require(:events)
-    end
-
-    def event_json(event)
-      {
-        raw: event.raw,
-        raw_hash: event.raw_hash,
-        signature: event.signature,
-        timestamp: event.timestamp,
-        session: event.session,
-        nonce: event.nonce,
-        signer: event.signer
-      }
+      params.require(:events)
     end
   end
 end

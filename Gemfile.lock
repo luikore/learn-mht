@@ -1,6 +1,15 @@
 GIT
+  remote: https://github.com/jasl/pagy-cursor.git
+  revision: b25cd0262e3592591e4eec9538f0a24b26e73157
+  branch: pagy-8
+  specs:
+    pagy_cursor (0.7.0)
+      activerecord (>= 5)
+      pagy (>= 6)
+
+GIT
   remote: https://github.com/rails/rails.git
-  revision: ee4a37164509bb04fa59adf8a8b717461bbbcb06
+  revision: 84c4598c93f04d00383e5e27cdffd65fb31ae5e7
   branch: main
   specs:
     actioncable (7.2.0.alpha)
@@ -138,7 +147,7 @@ GEM
     irb (1.12.0)
       rdoc
       reline (>= 0.4.2)
-    json (2.7.1)
+    json (2.7.2)
     keccak (1.3.1)
     language_server-protocol (3.17.0.3)
     loofah (2.22.0)
@@ -177,6 +186,7 @@ GEM
       racc (~> 1.4)
     nokogiri (1.16.3-x86_64-linux)
       racc (~> 1.4)
+    pagy (8.0.1)
     parallel (1.24.0)
     parser (3.3.0.5)
       ast (~> 2.4.1)
@@ -190,7 +200,7 @@ GEM
       railties (>= 7.0.0)
     psych (5.1.2)
       stringio
-    public_suffix (5.0.4)
+    public_suffix (5.0.5)
     puma (6.4.2)
       nio4r (~> 2.0)
     racc (1.7.3)
@@ -210,7 +220,7 @@ GEM
       loofah (~> 2.21)
       nokogiri (~> 1.14)
     rainbow (3.1.1)
-    rake (13.1.0)
+    rake (13.2.0)
     rbsecp256k1 (6.0.0)
       mini_portile2 (~> 2.8)
       pkg-config (~> 1.5)
@@ -318,6 +328,8 @@ DEPENDENCIES
   debug
   importmap-rails
   keccak
+  pagy
+  pagy_cursor!
   pg (~> 1.1)
   propshaft
   puma (>= 5.0)
