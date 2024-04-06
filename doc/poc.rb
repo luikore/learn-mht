@@ -6,6 +6,10 @@ CURRENT_PATH = Pathname.new File.expand_path(__dir__)
 
 require_relative "../config/environment"
 
+def assert(predicate)
+  raise RuntimeError, 'assertion failed', caller if not predicate
+end
+
 SECP256K1 = Secp256k1::Context.create
 # Fixed seed for test
 KEY_PAIR = SECP256K1.key_pair_from_private_key(
@@ -56,20 +60,21 @@ events_scope.each do |event|
   merkle_node = event.merkle_node
   proof = merkle_node.inclusion_proof
 
-  # puts "===="
-  # proof.each do |n|
-  #   if n.event_id.present?
-  #     puts "#{n.calculate_hash} Level: #{n.level}"
-  #   else
-  #     puts "#{n.calculate_hash} Children(#{n.children.size}): #{n.children.map(&:calculate_hash).join(", ")}  Level: #{n.level}"
-  #   end
-  # end
-  # puts "===="
+  stack = []
+  proof.each do |elem|
+    hash = elem[:hash]
+    reduce = elem[:reduce]
+    # is_path = elem[:is_path]
+    assert(stack.size >= reduce)
+    if reduce > 0
+      children = stack.pop reduce
+      assert(Digest::Keccak256.digest("\x01" + children.join) == hash)
+    end
+    stack.push hash
+  end
+  assert(stack.size == 1)
 
-  proof.map!(&:calculate_hash)
-  # pp proof
-
-  actual_hash = proof.last
+  actual_hash = proof.last[:hash]
   saved_hash = saved_hashes.fetch(event.created_at.to_i)
 
   puts "Expected: #{saved_hash}"

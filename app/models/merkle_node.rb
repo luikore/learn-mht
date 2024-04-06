@@ -37,12 +37,28 @@ class MerkleNode < ApplicationRecord
   end
 
   # An (inclusion) proof: the nodes required to compute the hash of timestamp.
-  # To verify:
   #
-  #   proof.each{|n| n.calculated_hash ||= MerkleNode.hasher.digest("\x01#{n.children.map(&:calculated_hash).join}") }
-  #   proof.last&.calculated_hash == expected_hash
+  # Returns [{hash: String, reduce: Integer, is_path: Boolean}]
   #
-  # To check consistency of 2 hashes we can just verify inclusion proof of both timestamp
+  # The hash of last element in the array is the root hash of the tree.
+  #
+  # To verify (js):
+  #
+  # const stack = []
+  # for (const elem of proof) {
+  #   const hash = elem.hash
+  #   const reduce = elem.reduce
+  #   const is_path = elem.is_path
+  #   assert(stack.length >= reduce)
+  #   if (reduce > 0) {
+  #     const children = stack.splice(-reduce)
+  #     assert(keccak256("\x01" + children.join("")) === hash)
+  #   }
+  #   stack.push(hash)
+  # }
+  # assert(stack.length === 1)
+  # assert(stack[0] === rootHash)
+  #
   def inclusion_proof
     return [] unless event
 
@@ -69,8 +85,9 @@ class MerkleNode < ApplicationRecord
         .find_by!("begin_timestamp = ? and end_timestamp >= ?", min_timestamp, timestamp)
 
     # search down, until the leaf
-    root_at_timestamp.calculated_hash = nil
-    path = [root_at_timestamp]
+    if root_at_timestamp.level > 0
+      root_at_timestamp.calculated_hash = nil
+    end
     node = root_at_timestamp
     while node.level > leaf.level
       node.load_children_covering timestamp
@@ -83,9 +100,24 @@ class MerkleNode < ApplicationRecord
       else
         raise "leaf not matched" if node.id != leaf.id
       end
-      path << node
     end
-    path.reverse!
+
+    # path nodes are referencing each other.
+    # traverse bottom-up to get a data structure that can be serialized to json
+    path = []
+    traverse = -> n {
+      if n.children
+        n.children.each {|ch| traverse[ch] }
+      end
+      path << n
+    }
+    traverse[root_at_timestamp]
+    stack = []
+    path.map! do |n|
+      is_path = (n.level == 0 or n.calculated_hash.nil?)
+      hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
+      {reduce: n.children&.size || 0, hash:, is_path:}
+    end
     path
   end
 
