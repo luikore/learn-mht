@@ -34,7 +34,6 @@ ActiveRecord::Schema[7.2].define(version: 2024_03_25_200103) do
     t.string "tree_hash", null: false
     t.bigint "event_id"
     t.string "calculated_hash"
-    t.string "calculated_tree_root_hash"
     t.integer "begin_timestamp", null: false
     t.integer "end_timestamp", null: false
     t.boolean "full", default: false, null: false

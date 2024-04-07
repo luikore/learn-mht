@@ -18,11 +18,7 @@ class Event < ApplicationRecord
             },
             comparison: {
               greater_than: ->(current) {
-                of_pubkey(current.pubkey)
-                  .order(created_at: :desc)
-                  .limit(1)
-                  .pluck(:created_at)
-                  .first || 0
+                current.latest&.created_at || 0
               }
             }
 
@@ -39,7 +35,7 @@ class Event < ApplicationRecord
     self.session = tags.find { |tag| tag[0] == "s" }&.[](1)
     self.topic = tags.find { |tag| tag[0] == "t" }&.[](1)
 
-    # TODO: TEST ONLY
+    # TODO: TEST ONLY, remove on next reset
     self.session ||= "test"
     self.topic ||= Digest::Keccak256.digest("test")
   end
@@ -53,11 +49,26 @@ class Event < ApplicationRecord
   end
 
   def merkle_tree_root
-    merkle_node.tree_root
+    merkle_node&.tree_root
   end
 
   def inclusion_proof
-    merkle_node.inclusion_proof
+    merkle_node&.inclusion_proof
+  end
+
+  def latest
+    @latest ||=
+      Event
+        .of_topic(topic)
+        .of_pubkey(pubkey)
+        .of_session(session)
+        .order(id: :desc)
+        .first
+  end
+
+  def reload(options = nil)
+    @latest = nil
+    super
   end
 
   class << self

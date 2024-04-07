@@ -8,7 +8,7 @@ module Bridging
       if @event.save
         render json: {
           status: "ok",
-          event: @event.raw_json
+          event: @event.nip1_json
         }
       else
         render json: {
@@ -27,10 +27,12 @@ module Bridging
           # Don't use batch insert for now because we want to validate data here
           # Could be optimize in the future
           event = Event.from_raw(nip1_json)
+
           unless event.save
-            # if event.errors[:sig].any?
-            #   next
-            # end
+            # TODO: TEST ONLY, remove on next reset
+            if event.errors[:created_at].any?
+              next
+            end
 
             error = {
               index: i,

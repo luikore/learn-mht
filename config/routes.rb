@@ -23,4 +23,16 @@ Rails.application.routes.draw do
       end
     end
   end
+
+  namespace :api do
+    root to: "home#index"
+
+    resources :topics, only: [] do
+      scope module: :topics do
+        resources :events, only: %i[index]
+      end
+    end
+
+    resources :events, only: %i[show]
+  end
 end

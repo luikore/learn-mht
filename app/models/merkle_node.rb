@@ -44,6 +44,9 @@ class MerkleNode < ApplicationRecord
   #
   # To verify (js):
   #
+  # import { keccak256 } from "ethereum-cryptography/keccak.js"
+  # import { bytesToHex } from "@ethereumjs/util";
+  #
   # const stack = []
   # for (const elem of proof) {
   #   const hash = elem.hash
@@ -52,18 +55,23 @@ class MerkleNode < ApplicationRecord
   #   assert(stack.length >= reduce)
   #   if (reduce > 0) {
   #     const children = stack.splice(-reduce)
-  #     assert(keccak256("\x01" + children.join("")) === hash)
+  #     const expectation = bytesToHex(keccak256(new TextEncoder().encode("\x01" + children.join("")))).slice(2)
+  #     assert(expectation === hash)
   #   }
   #   stack.push(hash)
   # }
   # assert(stack.length === 1)
   # assert(stack[0] === rootHash)
   #
-  def inclusion_proof
+  def inclusion_proof(target_event = event)
     return [] unless event
+    return [] unless target_event
+    if target_event.created_at < event.created_at
+      raise ArgumentError, "`target_event` must newer than the event"
+    end
 
     tree_hash = event.merkle_tree_hash
-    timestamp = event.created_at.to_i
+    timestamp = target_event.created_at.to_i
     leaf = MerkleNode.of_tree(tree_hash).find_by!(end_timestamp: timestamp, level: 0)
     if leaf.nil?
       return []
@@ -77,7 +85,7 @@ class MerkleNode < ApplicationRecord
         .pluck(:begin_timestamp)
         .first
 
-    # begin_timestamp = min_timestamp, means the node was once a root
+    # begin_timestamp == min_timestamp, means the node was once a root
     root_at_timestamp =
       MerkleNode
         .of_tree(tree_hash)
@@ -105,9 +113,9 @@ class MerkleNode < ApplicationRecord
     # path nodes are referencing each other.
     # traverse bottom-up to get a data structure that can be serialized to json
     path = []
-    traverse = -> n {
+    traverse = ->(n) {
       if n.children
-        n.children.each {|ch| traverse[ch] }
+        n.children.each { |ch| traverse[ch] }
       end
       path << n
     }
@@ -116,7 +124,7 @@ class MerkleNode < ApplicationRecord
     path.map! do |n|
       is_path = (n.level == 0 or n.calculated_hash.nil?)
       hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
-      {reduce: n.children&.size || 0, hash:, is_path:}
+      { reduce: n.children&.size || 0, hash:, is_path: }
     end
     path
   end

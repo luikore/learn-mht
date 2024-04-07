@@ -2,6 +2,6 @@
 
 module Api
   class ApplicationController < ActionController::API
-    include Pagy::Backend
+    include Pagy::Backends::UuidCursor
   end
 end

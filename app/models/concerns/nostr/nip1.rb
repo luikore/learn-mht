@@ -58,16 +58,19 @@ module Nostr
         serialized_nostr_event.to_json
       end
 
-      def raw_json
+      def nip1_hash
         {
-          kind:,
-          content:,
-          pubkey:,
-          sig:,
-          created_at: created_at.to_i,
           id: eid,
-          tags: tags
-        }.to_json
+          pubkey:,
+          created_at: created_at.to_i,
+          kind:,
+          tags: tags,
+          content:,
+          sig:
+        }
+      end
+      def nip1_json
+        nip1_hash.to_json
       end
 
       def computed_eid

@@ -36,7 +36,6 @@ gem "bootsnap", require: false
 gem "with_advisory_lock"
 
 gem "pagy"
-gem "pagy_cursor", github: "jasl/pagy-cursor", branch: "pagy-8"
 
 gem "rbsecp256k1"
 gem "keccak"
