@@ -91,6 +91,8 @@ class MerkleNode < ApplicationRecord
         end
         node.children.each do |child|
           if child.end_timestamp < end_timestamp or child.begin_timestamp > end_timestamp
+            node.calculate_hash
+            node.children = nil
             stack << node
           else
             traverse[child]
