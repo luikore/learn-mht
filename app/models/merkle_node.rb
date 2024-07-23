@@ -36,6 +36,79 @@ class MerkleNode < ApplicationRecord
     calculated_hash
   end
 
+  # A consistency proof: if current hash is consistent with a node
+  #
+  # Returns [{hash: String, reduce: Integer, is_path: Boolean}]
+  #
+  # The hash of last element in the array is the root hash of the tree.
+  #
+  # To verify (js):
+  #
+  # const stack = []
+  # for (const elem of proof) {
+  #   const hash = elem.hash
+  #   const reduce = elem.reduce
+  #   // if the node is in the calculation path of inclusion proof
+  #   const is_path = elem.is_path
+  #   assert(stack.length >= reduce)
+  #   if (reduce > 0) {
+  #     const children = stack.splice(-reduce)
+  #     assert(keccak256("\x01" + children.join("")) === hash)
+  #   }
+  #   stack.push(hash)
+  # }
+  # assert(stack.length === 1)
+  # assert(stack[0] === rootHash)
+  #
+  def consistency_proof
+    return [] unless event
+
+    # the tree is growing at the same time,
+    # this will be our snapshot for traversing
+    root_ts =
+      MerkleNode
+        .of_tree(tree_hash)
+        .order(end_timestamp: :desc)
+        .limit(1)
+        .pluck(:end_timestamp)
+        .first
+    return [] if not root_ts
+
+    # node's timestamp represents a root in past moment.
+    # before that moment, we compute the inclusion.
+    # after that moment, we compute the consistency.
+
+    # it is like a binary search-down
+    # - when node doesn't overlap with ts, we take the hash
+    # - when node overlaps with ts, we drill down to children
+
+    stack = []
+    traverse = ->(node) do
+      if node.level > 0
+        node.load_children_end_with root_ts
+        unless (1..2).cover? node.children.size
+          raise "bad children size: #{node.children.size} for #{node.id}"
+        end
+        node.children.each do |child|
+          if child.end_timestamp < end_timestamp or child.begin_timestamp > end_timestamp
+            stack << node
+          else
+            traverse[child]
+          end
+        end
+      end
+      stack << node
+    end
+    traverse[self]
+
+    stack.map! do |n|
+      is_path = (n.end_timestamp == end_timestamp)
+      hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
+      { reduce: n.children&.size || 0, hash:, is_path: }
+    end
+    stack
+  end
+
   # An (inclusion) proof: the nodes required to compute the hash of timestamp.
   #
   # Returns [{hash: String, reduce: Integer, is_path: Boolean}]
@@ -48,7 +121,7 @@ class MerkleNode < ApplicationRecord
   # for (const elem of proof) {
   #   const hash = elem.hash
   #   const reduce = elem.reduce
-  #   const is_path = elem.is_path
+  #   const is_path = elem.is_path # if the node is in the calculation path
   #   assert(stack.length >= reduce)
   #   if (reduce > 0) {
   #     const children = stack.splice(-reduce)
@@ -68,7 +141,7 @@ class MerkleNode < ApplicationRecord
     if leaf.nil?
       return []
     end
-    # TODO: min_timestamp for each tree can be cached in memory
+    # TODO: min_timestamp for each tree can be cached in memory, or, we just keep it 0
     min_timestamp =
       MerkleNode
         .of_tree(tree_hash)
@@ -90,7 +163,7 @@ class MerkleNode < ApplicationRecord
     end
     node = root_at_timestamp
     while node.level > leaf.level
-      node.load_children_covering timestamp
+      node.load_children_end_with timestamp
       unless (1..2).cover? node.children.size
         raise "bad children size: #{node.children.size} for #{node.id}"
       end
@@ -112,11 +185,10 @@ class MerkleNode < ApplicationRecord
       path << n
     }
     traverse[root_at_timestamp]
-    stack = []
     path.map! do |n|
       is_path = (n.level == 0 or n.calculated_hash.nil?)
       hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
-      {reduce: n.children&.size || 0, hash:, is_path:}
+      { reduce: n.children&.size || 0, hash:, is_path: }
     end
     path
   end
@@ -290,7 +362,7 @@ class MerkleNode < ApplicationRecord
                       .to_a
   end
 
-  def load_children_covering(child_end_timestamp)
+  def load_children_end_with(child_end_timestamp)
     self.children = MerkleNode
                       .of_tree(tree_hash)
                       .where(
