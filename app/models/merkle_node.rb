@@ -72,7 +72,7 @@ class MerkleNode < ApplicationRecord
         .limit(1)
         .pluck(:end_timestamp)
         .first
-    return [] if not root_ts
+    return [] unless root_ts
 
     # node's timestamp represents a root in past moment.
     # before that moment, we compute the inclusion.

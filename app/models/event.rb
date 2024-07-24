@@ -52,6 +52,10 @@ class Event < ApplicationRecord
     merkle_node&.tree_root
   end
 
+  def consistency_proof
+    merkle_node&.consistency_proof
+  end
+
   def inclusion_proof
     merkle_node&.inclusion_proof
   end

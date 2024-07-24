@@ -18,7 +18,7 @@ KEY_PAIR = SECP256K1.key_pair_from_private_key(
 )
 SIGNER_PUBLIC_KEY = Secp256k1::Util.bin_to_hex(KEY_PAIR.public_key.compressed)[2..]
 
-(1..100).to_a.map(&:to_s).each_with_index do |content, i|
+(1..10).to_a.map(&:to_s).each_with_index do |content, i|
   # https://github.com/OpenZeppelin/merkle-tree?tab=readme-ov-file#standard-merkle-trees
   timestamp = 1708758140 + i
   session = "0"
@@ -54,7 +54,7 @@ root_hash = root.calculated_hash
 puts "root hash: #{root_hash}"
 puts ""
 
-# proof
+# Inclusion proof
 events_scope.each do |event|
   puts "Event id: #{event.eid}"
 
@@ -79,6 +79,35 @@ events_scope.each do |event|
     raise "Inclusion proof invalid, expect: #{root_hash}, got: #{stack[0]}"
   else
     puts "Inclusion proof verified"
+  end
+  puts ""
+end
+
+# Consistency proof
+events_scope.each do |event|
+  puts "Event id: #{event.eid}"
+
+  merkle_node = event.merkle_node
+  consistency_proof = merkle_node.consistency_proof
+
+  stack = []
+  consistency_proof.each do |elem|
+    hash = elem.fetch(:hash)
+    reduce = elem.fetch(:reduce)
+    # is_path = elem.fetch(:is_path)
+    assert(stack.size >= reduce)
+    if reduce > 0
+      children = stack.pop reduce
+      assert(Digest::Keccak256.digest("\x01" + children.join) == hash)
+    end
+    stack.push hash
+  end
+  assert(stack.size == 1)
+
+  if stack[0] != root_hash
+    raise "Consistency proof invalid, expect: #{root_hash}, got: #{stack[0]}"
+  else
+    puts "Consistency proof verified"
   end
   puts ""
 end

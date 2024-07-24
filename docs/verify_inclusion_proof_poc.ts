@@ -118,7 +118,11 @@ const mockJson = {
             "reduce": 1,
             "hash": "ef79a68543c75114c3c244e8248b2088080d85d0d813d9a798e815dd0965a99b",
             "is_path": true
-        }, {"reduce": 2, "hash": "c095a4cff99d2715846b3fe52cf3b531f09c898ef2bd2973c46ee51021999d85", "is_path": true}]
+        }, {
+            "reduce": 2,
+            "hash": "c095a4cff99d2715846b3fe52cf3b531f09c898ef2bd2973c46ee51021999d85",
+            "is_path": true
+        }]
     }
 }
 
