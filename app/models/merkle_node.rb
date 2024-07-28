@@ -12,6 +12,9 @@ class MerkleNode < ApplicationRecord
   class_attribute :hasher, default: Digest::Keccak256
   attr_accessor :parent, :children
 
+  # 2**100 is enough for any tree at the time of writing
+  TRAVERSE_MAX_DEPTH = 100
+
   def readonly?
     persisted? && event
   end
@@ -83,7 +86,10 @@ class MerkleNode < ApplicationRecord
     # - when node overlaps with ts, we drill down to children
 
     stack = []
-    traverse = ->(node) do
+    traverse = ->(node, max_depth) do
+      if max_depth == 0
+        raise "bad data: max depth reached"
+      end
       if node.level > 0
         node.load_children_end_with root_ts
         unless (1..2).cover? node.children.size
@@ -91,17 +97,15 @@ class MerkleNode < ApplicationRecord
         end
         node.children.each do |child|
           if child.end_timestamp < end_timestamp or child.begin_timestamp > end_timestamp
-            node.calculate_hash
-            node.children = nil
             stack << node
           else
-            traverse[child]
+            traverse[child, max_depth - 1]
           end
         end
       end
       stack << node
     end
-    traverse[self]
+    traverse[self, TRAVERSE_MAX_DEPTH]
 
     stack.map! do |n|
       is_path = (n.end_timestamp == end_timestamp)
@@ -188,13 +192,16 @@ class MerkleNode < ApplicationRecord
     # path nodes are referencing each other.
     # traverse bottom-up to get a data structure that can be serialized to json
     path = []
-    traverse = ->(n) {
+    traverse = ->(n, max_depth) {
+      if max_depth == 0
+        raise "bad data: max depth reached"
+      end
       if n.children
-        n.children.each { |ch| traverse[ch] }
+        n.children.each { |ch| traverse[ch, max_depth - 1] }
       end
       path << n
     }
-    traverse[root_at_timestamp]
+    traverse[root_at_timestamp, TRAVERSE_MAX_DEPTH]
     path.map! do |n|
       is_path = (n.level == 0 or n.calculated_hash.nil?)
       hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
