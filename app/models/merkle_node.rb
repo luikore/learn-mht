@@ -64,18 +64,9 @@ class MerkleNode < ApplicationRecord
   # assert(stack[0] === rootHash)
   #
   def consistency_proof
-    return [] unless event
+    # return [] unless event # XXX: branches do not have event
 
-    # the tree is growing at the same time,
-    # this will be our snapshot for traversing
-    root_ts =
-      MerkleNode
-        .of_tree(tree_hash)
-        .order(end_timestamp: :desc)
-        .limit(1)
-        .pluck(:end_timestamp)
-        .first
-    return [] unless root_ts
+    # NOTE: assume the tree is untainted, or this method will be very complicated
 
     # node's timestamp represents a root in past moment.
     # before that moment, we compute the inclusion.
@@ -91,13 +82,14 @@ class MerkleNode < ApplicationRecord
         raise "bad data: max depth reached"
       end
       if node.level > 0
-        node.load_children_end_with root_ts
+        node.load_children
         unless (1..2).cover? node.children.size
           raise "bad children size: #{node.children.size} for #{node.id}"
         end
         node.children.each do |child|
           if child.end_timestamp < end_timestamp or child.begin_timestamp > end_timestamp
-            stack << node
+            # assume all nodes have calculated_hash
+            stack << child
           else
             traverse[child, max_depth - 1]
           end
@@ -105,12 +97,13 @@ class MerkleNode < ApplicationRecord
       end
       stack << node
     end
-    traverse[self, TRAVERSE_MAX_DEPTH]
+    root = MerkleNode.of_tree(tree_hash).order(level: :desc).first!
+    traverse[root, TRAVERSE_MAX_DEPTH]
 
     stack.map! do |n|
       is_path = (n.end_timestamp == end_timestamp)
-      hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
-      { reduce: n.children&.size || 0, hash:, is_path: }
+      hash = n.calculated_hash
+      { id: n.id, reduce: n.children&.size || 0, hash:, is_path: }
     end
     stack
   end
@@ -143,7 +136,7 @@ class MerkleNode < ApplicationRecord
   # assert(stack[0] === rootHash)
   #
   def inclusion_proof(target_event = event)
-    return [] unless event
+    # return [] unless event
     return [] unless target_event
     if target_event.created_at < event.created_at
       raise ArgumentError, "`target_event` must newer than the event"
@@ -205,7 +198,7 @@ class MerkleNode < ApplicationRecord
     path.map! do |n|
       is_path = (n.level == 0 or n.calculated_hash.nil?)
       hash = (n.calculated_hash ||= MerkleNode.calculate_hash(n.children.map(&:calculated_hash).join))
-      { reduce: n.children&.size || 0, hash:, is_path: }
+      { id: n.id, reduce: n.children&.size || 0, hash:, is_path: }
     end
     path
   end
@@ -342,10 +335,11 @@ class MerkleNode < ApplicationRecord
     # single sql to find all nodes for update
     # upcase first SELECT for proper benchmark
     # TODO: in batch of 1000
-    connection.execute(sanitize_sql_array(["SELECT id,
+    rows = connection.execute(sanitize_sql_array(["SELECT id,
     (select json_build_object('ids', json_agg(n.id), 'hashes', json_agg(n.calculated_hash)) from merkle_nodes n where
     n.tree_hash = ? and n.level = m.level - 1 and (n.begin_timestamp = m.begin_timestamp or n.end_timestamp = m.end_timestamp)) as children
-    from merkle_nodes m where m.tree_hash = ? and m.calculated_hash is null order by m.level asc", tree_hash, tree_hash])).each do |row|
+    from merkle_nodes m where m.tree_hash = ? and m.calculated_hash is null order by m.level asc", tree_hash, tree_hash]))
+    rows.each do |row|
       parent_id = row["id"]
       children = JSON.parse row["children"]
       raise "bad children size: #{children["ids"].size} for #{row["id"]}" if children["ids"].size > 2
